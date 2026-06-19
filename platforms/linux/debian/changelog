@@ -1,8 +1,8 @@
-gearcoleco (1.5.5-1~ppa1~noble1) noble; urgency=medium
+gearcoleco (1.6.3-1~ppa1) UNRELEASED; urgency=medium
 
-  * Initial PPA build for Noble.
-  * Add Debian packaging for Gearcoleco 1.5.5.
-  * Build against libsdl3-dev from the ubuntu-goodies PPA.
+  * Initial PPA build.
+  * Add Debian packaging for Gearcoleco 1.6.3.
+  * Built against libsdl3-dev from the johngrimmreaper Ubuntu PPA https://launchpad.net/~johngrimmreaper
   * Install the binary under /usr/games.
   * Add a desktop entry and application icon.
   * Add a minimal manual page.

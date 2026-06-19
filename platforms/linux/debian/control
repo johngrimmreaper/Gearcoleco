@@ -14,7 +14,7 @@ Vcs-Browser: https://github.com/drhelius/Gearcoleco
 Vcs-Git: https://github.com/drhelius/Gearcoleco.git
 
 Package: gearcoleco
-Architecture: amd64 i386 arm64 armhf
+Architecture: amd64 amd64v3 i386 arm64 armhf
 Depends:
  ${misc:Depends},
  ${shlibs:Depends}

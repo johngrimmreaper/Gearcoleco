@@ -18,6 +18,7 @@
  */
 
 #include <iomanip>
+#include <string>
 #include <string.h>
 #include "GearcolecoCore.h"
 #include "Memory.h"
@@ -239,15 +240,12 @@ void GearcolecoCore::SaveDisassembledROM()
     {
         using namespace std;
 
-        char path[512];
+        string path = string(m_pCartridge->GetFilePath()) + ".dis";
 
-        strcpy(path, m_pCartridge->GetFilePath());
-        strcat(path, ".dis");
-
-        Log("Saving Disassembled ROM %s...", path);
+        Log("Saving Disassembled ROM %s...", path.c_str());
 
         ofstream myfile;
-        open_ofstream_utf8(myfile, path, ios::out | ios::trunc);
+        open_ofstream_utf8(myfile, path.c_str(), ios::out | ios::trunc);
 
         if (myfile.is_open())
         {
@@ -321,6 +319,11 @@ Audio* GearcolecoCore::GetAudio()
 Video* GearcolecoCore::GetVideo()
 {
     return m_pVideo;
+}
+
+Input* GearcolecoCore::GetInput()
+{
+    return m_pInput;
 }
 
 TraceLogger* GearcolecoCore::GetTraceLogger()
@@ -494,8 +497,10 @@ void GearcolecoCore::LoadRam(const char* szPath, bool fullPath)
         return;
 
     Mapper* pMapper = m_pMemory->GetMapper();
+    u8* pSaveData = IsValidPointer(pMapper) ? pMapper->GetSaveData() : NULL;
+    int saveDataSize = IsValidPointer(pMapper) ? pMapper->GetSaveDataSize() : 0;
 
-    if (!IsValidPointer(pMapper) || pMapper->GetSaveDataSize() <= 0)
+    if (!IsValidPointer(pSaveData) || saveDataSize <= 0)
         return;
 
     Log("Loading RAM...");
@@ -532,9 +537,21 @@ void GearcolecoCore::LoadRam(const char* szPath, bool fullPath)
 
     if (file.is_open())
     {
-        file.read(reinterpret_cast<char*>(pMapper->GetSaveData()), pMapper->GetSaveDataSize());
+        u8* pLoadedData = new u8[saveDataSize];
+        file.read(reinterpret_cast<char*>(pLoadedData), saveDataSize);
+
+        if (file.gcount() == saveDataSize)
+        {
+            memcpy(pSaveData, pLoadedData, saveDataSize);
+            Log("RAM loaded from %s", path.c_str());
+        }
+        else
+        {
+            Error("Unable to read complete RAM file: %s", path.c_str());
+        }
+
         file.close();
-        Log("RAM loaded from %s", path.c_str());
+        SafeDeleteArray(pLoadedData);
     }
     else
     {
@@ -929,10 +946,12 @@ bool GearcolecoCore::GetSaveStateHeader(int index, const char* path, GC_SaveStat
     {
         stream.seekg(savestate_size - sizeof(GC_SaveState_Header), ios::beg);
         stream.read(reinterpret_cast<char*>(header), sizeof(GC_SaveState_Header));
-        stream.close();
 
         if ((header->magic == GC_SAVESTATE_MAGIC) && (header->size == savestate_size))
+        {
+            stream.close();
             return true;
+        }
     }
 
     // Try legacy V1 format
@@ -945,7 +964,6 @@ bool GearcolecoCore::GetSaveStateHeader(int index, const char* path, GC_SaveStat
         stream.seekg(savestate_size - (2 * sizeof(u32)), ios::beg);
         stream.read(reinterpret_cast<char*>(&v1_magic), sizeof(v1_magic));
         stream.read(reinterpret_cast<char*>(&v1_size), sizeof(v1_size));
-        stream.close();
 
         if ((v1_magic == GC_SAVESTATE_MAGIC) && (v1_size == savestate_size))
         {
@@ -954,6 +972,7 @@ bool GearcolecoCore::GetSaveStateHeader(int index, const char* path, GC_SaveStat
             header->version = GC_SAVESTATE_VERSION_V1;
             header->size = v1_size;
             strncpy_fit(header->rom_name, m_pCartridge->GetFileName(), sizeof(header->rom_name));
+            stream.close();
             return true;
         }
     }
@@ -966,7 +985,7 @@ bool GearcolecoCore::GetSaveStateScreenshot(int index, const char* path, GC_Save
 {
     using namespace std;
 
-    if (!IsValidPointer(screenshot->data) || (screenshot->size == 0))
+    if (!IsValidPointer(screenshot) || !IsValidPointer(screenshot->data) || (screenshot->size == 0))
     {
         Error("Invalid save state screenshot buffer");
         return false;

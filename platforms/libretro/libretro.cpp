@@ -40,6 +40,8 @@ static const char slash = '/';
 #define MAX_PADS 2
 #define JOYPAD_BUTTONS 16
 
+#define RETRO_DEVICE_COLECOVISION RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 0)
+
 static struct retro_log_callback logging;
 retro_log_printf_t log_cb;
 static char retro_system_directory[4096];
@@ -51,7 +53,7 @@ static int current_screen_width = 0;
 static int current_screen_height = 0;
 static float current_aspect_ratio = 0;
 static bool allow_up_down = false;
-static bool libretro_supports_bitmasks;
+static bool libretro_supports_bitmasks = false;
 static int spinner_support = 0;
 static int spinner_sensitivity = 1;
 static float aspect_ratio = 0.0f;
@@ -65,6 +67,10 @@ static int joypad[MAX_PADS][JOYPAD_BUTTONS];
 static int joypre[MAX_PADS][JOYPAD_BUTTONS];
 static int joypad_ext[MAX_PADS][4];
 static int joypre_ext[MAX_PADS][4];
+static unsigned input_device[MAX_PADS] = {
+    RETRO_DEVICE_COLECOVISION,
+    RETRO_DEVICE_COLECOVISION
+};
 static bool mouse[2];
 static bool mousepre[2];
 
@@ -102,6 +108,15 @@ static void fallback_log(enum retro_log_level level, const char *fmt, ...)
 
 static retro_environment_t environ_cb;
 
+static bool IsJoypadDevice(unsigned device)
+{
+    return ((device == RETRO_DEVICE_JOYPAD) || (device == RETRO_DEVICE_COLECOVISION));
+}
+
+static void clear_input_state(void);
+static void reset_controller_devices(void);
+static void apply_controller_device(unsigned port, unsigned device, bool log_device);
+
 void retro_init(void)
 {
     if (environ_cb(RETRO_ENVIRONMENT_GET_LOG_INTERFACE, &logging))
@@ -135,6 +150,11 @@ void retro_init(void)
     config.region = Cartridge::CartridgeUnknownRegion;
     config.type = Cartridge::CartridgeNotSupported;
 
+    clear_input_state();
+
+    for (int i = 0; i < MAX_PADS; i++)
+        apply_controller_device(i, input_device[i], false);
+
     libretro_supports_bitmasks = environ_cb(RETRO_ENVIRONMENT_GET_INPUT_BITMASKS, NULL);
 }
 
@@ -142,6 +162,16 @@ void retro_deinit(void)
 {
     SafeDeleteArray(frame_buffer);
     SafeDelete(core);
+
+    audio_sample_count = 0;
+    current_screen_width = 0;
+    current_screen_height = 0;
+    current_aspect_ratio = 0.0f;
+    aspect_ratio = 0.0f;
+    libretro_supports_bitmasks = false;
+
+    reset_controller_devices();
+    clear_input_state();
 }
 
 unsigned retro_api_version(void)
@@ -151,7 +181,49 @@ unsigned retro_api_version(void)
 
 void retro_set_controller_port_device(unsigned port, unsigned device)
 {
-    log_cb(RETRO_LOG_DEBUG, "Plugging device %u into port %u.\n", device, port);
+    if (port >= MAX_PADS)
+    {
+        if (log_cb)
+            log_cb(RETRO_LOG_DEBUG, "retro_set_controller_port_device invalid port number: %u\n", port);
+        return;
+    }
+
+    input_device[port] = device;
+
+    apply_controller_device(port, device, true);
+}
+
+static void clear_input_state(void)
+{
+    for (int i = 0; i < MAX_PADS; i++)
+    {
+        for (int j = 0; j < JOYPAD_BUTTONS; j++)
+        {
+            joypad[i][j] = 0;
+            joypre[i][j] = 0;
+        }
+
+        for (int j = 0; j < 4; j++)
+        {
+            joypad_ext[i][j] = 0;
+            joypre_ext[i][j] = 0;
+        }
+
+        mouse[i] = false;
+        mousepre[i] = false;
+    }
+}
+
+static void reset_controller_devices(void)
+{
+    for (int i = 0; i < MAX_PADS; i++)
+        input_device[i] = RETRO_DEVICE_COLECOVISION;
+}
+
+static void apply_controller_device(unsigned port, unsigned device, bool log_device)
+{
+    if (log_device && log_cb)
+        log_cb(RETRO_LOG_DEBUG, "Plugging device %u into port %u.\n", device, port);
 
     struct retro_input_descriptor joypad[] = {
 
@@ -204,7 +276,20 @@ void retro_set_controller_port_device(unsigned port, unsigned device)
         { 0, 0, 0, 0, NULL }
     };
 
-    if (device == RETRO_DEVICE_JOYPAD)
+    if (!environ_cb)
+        return;
+
+    bool joypad_connected = false;
+    for (int i = 0; i < MAX_PADS; i++)
+    {
+        if (IsJoypadDevice(input_device[i]))
+        {
+            joypad_connected = true;
+            break;
+        }
+    }
+
+    if (joypad_connected)
         environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, joypad);
     else
         environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc);
@@ -247,16 +332,20 @@ void retro_set_environment(retro_environment_t cb)
     environ_cb = cb;
 
     static const struct retro_controller_description port_1[] = {
-        { "ColecoVision", RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 0) },
+        { "Joypad Auto", RETRO_DEVICE_JOYPAD },
+        { "Joypad Port Empty", RETRO_DEVICE_NONE },
+        { "ColecoVision", RETRO_DEVICE_COLECOVISION },
     };
 
     static const struct retro_controller_description port_2[] = {
-        { "ColecoVision", RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 0) },
+        { "Joypad Auto", RETRO_DEVICE_JOYPAD },
+        { "Joypad Port Empty", RETRO_DEVICE_NONE },
+        { "ColecoVision", RETRO_DEVICE_COLECOVISION },
     };
 
     static const struct retro_controller_info ports[] = {
-        { port_1, 1 },
-        { port_2, 1 },
+        { port_1, 3 },
+        { port_2, 3 },
         { NULL, 0 },
     };
 
@@ -323,15 +412,23 @@ static void update_input(void)
     if (libretro_supports_bitmasks)
     {
         for (int j = 0; j < MAX_PADS; j++)
-            joypad_bits[j] = input_state_cb(j, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_MASK);
+        {
+            if (IsJoypadDevice(input_device[j]))
+                joypad_bits[j] = input_state_cb(j, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_MASK);
+            else
+                joypad_bits[j] = 0;
+        }
     }
     else
     {
         for (int j = 0; j < MAX_PADS; j++)
         {
             joypad_bits[j] = 0;
-            for (int i = 0; i < (RETRO_DEVICE_ID_JOYPAD_R3+1); i++)
-                joypad_bits[j] |= input_state_cb(j, RETRO_DEVICE_JOYPAD, 0, i) ? (1 << i) : 0;
+            if (IsJoypadDevice(input_device[j]))
+            {
+                for (int i = 0; i < (RETRO_DEVICE_ID_JOYPAD_R3+1); i++)
+                    joypad_bits[j] |= input_state_cb(j, RETRO_DEVICE_JOYPAD, 0, i) ? (1 << i) : 0;
+            }
         }
     }
 
@@ -356,10 +453,57 @@ static void update_input(void)
         }
         else
         {
-            joypad[j][0] = (joypad_bits[j] & (1 << RETRO_DEVICE_ID_JOYPAD_UP)) && ((joypre[j][0] == 1) || !(joypad_bits[j] & (1 << RETRO_DEVICE_ID_JOYPAD_DOWN)))    ? 1 : 0;
-            joypad[j][1] = (joypad_bits[j] & (1 << RETRO_DEVICE_ID_JOYPAD_DOWN)) && ((joypre[j][1] == 1) || !(joypad_bits[j] & (1 << RETRO_DEVICE_ID_JOYPAD_UP)))    ? 1 : 0;
-            joypad[j][2] = (joypad_bits[j] & (1 << RETRO_DEVICE_ID_JOYPAD_LEFT)) && ((joypre[j][2] == 1) || !(joypad_bits[j] & (1 << RETRO_DEVICE_ID_JOYPAD_RIGHT))) ? 1 : 0;
-            joypad[j][3] = (joypad_bits[j] & (1 << RETRO_DEVICE_ID_JOYPAD_RIGHT)) && ((joypre[j][3] == 1) || !(joypad_bits[j] & (1 << RETRO_DEVICE_ID_JOYPAD_LEFT))) ? 1 : 0;
+            bool raw_up = (joypad_bits[j] & (1 << RETRO_DEVICE_ID_JOYPAD_UP)) != 0;
+            bool raw_down = (joypad_bits[j] & (1 << RETRO_DEVICE_ID_JOYPAD_DOWN)) != 0;
+            bool raw_left = (joypad_bits[j] & (1 << RETRO_DEVICE_ID_JOYPAD_LEFT)) != 0;
+            bool raw_right = (joypad_bits[j] & (1 << RETRO_DEVICE_ID_JOYPAD_RIGHT)) != 0;
+            bool up = raw_up;
+            bool down = raw_down;
+            bool left = raw_left;
+            bool right = raw_right;
+
+            if (raw_up && raw_down)
+            {
+                if (joypre[j][0] == 1)
+                {
+                    up = true;
+                    down = false;
+                }
+                else if (joypre[j][1] == 1)
+                {
+                    up = false;
+                    down = true;
+                }
+                else
+                {
+                    up = true;
+                    down = false;
+                }
+            }
+
+            if (raw_left && raw_right)
+            {
+                if (joypre[j][2] == 1)
+                {
+                    left = true;
+                    right = false;
+                }
+                else if (joypre[j][3] == 1)
+                {
+                    left = false;
+                    right = true;
+                }
+                else
+                {
+                    left = true;
+                    right = false;
+                }
+            }
+
+            joypad[j][0] = up ? 1 : 0;
+            joypad[j][1] = down ? 1 : 0;
+            joypad[j][2] = left ? 1 : 0;
+            joypad[j][3] = right ? 1 : 0;
         }
         joypad[j][4] = joypad_bits[j] & (1 << RETRO_DEVICE_ID_JOYPAD_A)      ? 1 : 0;
         joypad[j][5] = joypad_bits[j] & (1 << RETRO_DEVICE_ID_JOYPAD_B)      ? 1 : 0;
@@ -374,10 +518,18 @@ static void update_input(void)
         joypad[j][14] = joypad_bits[j] & (1 << RETRO_DEVICE_ID_JOYPAD_L3)    ? 1 : 0;
         joypad[j][15] = joypad_bits[j] & (1 << RETRO_DEVICE_ID_JOYPAD_R3)    ? 1 : 0;
 
-        int analog_left_x = input_state_cb( j, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X);
-        int analog_left_y = input_state_cb( j, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y);
-        int analog_right_x = input_state_cb( j, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_X);
-        int analog_right_y = input_state_cb( j, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_Y);
+        int analog_left_x = 0;
+        int analog_left_y = 0;
+        int analog_right_x = 0;
+        int analog_right_y = 0;
+
+        if (IsJoypadDevice(input_device[j]))
+        {
+            analog_left_x = input_state_cb( j, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X);
+            analog_left_y = input_state_cb( j, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y);
+            analog_right_x = input_state_cb( j, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_X);
+            analog_right_y = input_state_cb( j, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_Y);
+        }
 
         const int threshold = 4000;
 

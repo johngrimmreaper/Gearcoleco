@@ -30,11 +30,11 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
     <tr>
       <td rowspan="2"><strong>Windows</strong></td>
       <td>Desktop x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.3/Gearcoleco-1.6.3-desktop-windows-x64.zip">Gearcoleco-1.6.3-desktop-windows-x64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-desktop-windows-x64.zip">Gearcoleco-1.6.8-desktop-windows-x64.zip</a></td>
     </tr>
     <tr>
       <td>Desktop ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.3/Gearcoleco-1.6.3-desktop-windows-arm64.zip">Gearcoleco-1.6.3-desktop-windows-arm64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-desktop-windows-arm64.zip">Gearcoleco-1.6.8-desktop-windows-arm64.zip</a></td>
     </tr>
     <tr>
       <td rowspan="3"><strong>macOS</strong></td>
@@ -43,11 +43,11 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
     </tr>
     <tr>
       <td>Desktop Apple Silicon</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.3/Gearcoleco-1.6.3-desktop-macos-arm64.zip">Gearcoleco-1.6.3-desktop-macos-arm64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-desktop-macos-arm64.zip">Gearcoleco-1.6.8-desktop-macos-arm64.zip</a></td>
     </tr>
     <tr>
       <td>Desktop Intel</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.3/Gearcoleco-1.6.3-desktop-macos-intel.zip">Gearcoleco-1.6.3-desktop-macos-intel.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-desktop-macos-intel.zip">Gearcoleco-1.6.8-desktop-macos-intel.zip</a></td>
     </tr>
     <tr>
       <td rowspan="5"><strong>Linux</strong></td>
@@ -60,15 +60,15 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
     </tr>
     <tr>
       <td>Desktop Ubuntu 24.04 x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.3/Gearcoleco-1.6.3-desktop-ubuntu24.04-x64.zip">Gearcoleco-1.6.3-desktop-ubuntu24.04-x64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-desktop-ubuntu24.04-x64.zip">Gearcoleco-1.6.8-desktop-ubuntu24.04-x64.zip</a></td>
     </tr>
     <tr>
       <td>Desktop Ubuntu 22.04 x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.3/Gearcoleco-1.6.3-desktop-ubuntu22.04-x64.zip">Gearcoleco-1.6.3-desktop-ubuntu22.04-x64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-desktop-ubuntu22.04-x64.zip">Gearcoleco-1.6.8-desktop-ubuntu22.04-x64.zip</a></td>
     </tr>
     <tr>
       <td>Desktop Ubuntu 24.04 ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.3/Gearcoleco-1.6.3-desktop-ubuntu24.04-arm64.zip">Gearcoleco-1.6.3-desktop-ubuntu24.04-arm64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-desktop-ubuntu24.04-arm64.zip">Gearcoleco-1.6.8-desktop-ubuntu24.04-arm64.zip</a></td>
     </tr>
     <tr>
       <td><strong>MCPB</strong></td>
@@ -90,6 +90,7 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
 
 **Notes:**
 - **Windows**: May need [Visual C++ Redistributable](https://go.microsoft.com/fwlink/?LinkId=746572) and [OpenGL Compatibility Pack](https://apps.microsoft.com/detail/9nqpsl29bfff)
+- **Homebrew**: If Homebrew asks you to trust the third-party tap, run `brew trust --tap drhelius/geardome`
 - **Linux**: May need `libsdl3`
 
 ## Features
@@ -98,13 +99,15 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
 - Support for ColecoVision Super Game Module (SGM) and MegaCart ROMs.
 - Support for Super Action Controller (SAC), Wheel Controller and Roller Controller.
 - Save states with preview and rewind support.
+- Run-ahead support to reduce input latency.
 - Compressed ROM support (ZIP).
 - VGM recorder.
 - Supported platforms (standalone): Windows, Linux, BSD and macOS.
 - Supported platforms (libretro): Windows, Linux, macOS, Raspberry Pi, Android, iOS, tvOS, webOS, PlayStation Vita, PlayStation 3, Nintendo 3DS, Nintendo GameCube, Nintendo Wii, Nintendo WiiU, Nintendo Switch, Emscripten, Classic Mini systems (NES, SNES, C64, ...), OpenDingux, RetroFW and QNX.
 - Full debugger with just-in-time disassembler, CPU breakpoints, memory access breakpoints, code navigation (goto address, JP JR and CALL double clicking), debug symbols, automatic labels, memory editor, trace logger, IO inspector and VRAM viewer including registers, tiles, sprites and backgrounds.
 - MCP server for AI-assisted debugging with GitHub Copilot, Claude, Codex and similar, exposing tools for execution control, memory inspection, hardware status, rewind and more.
-- Windows and Linux *Portable Mode*.
+- Windows, Linux and macOS *Portable Mode*.
+- [Programmable Shader Chain](platforms/shared/desktop/shaders/README.md).
 - ROM loading from the command line by adding the ROM path as an argument.
 - ROM loading using drag & drop.
 - Support for modern game controllers through [gamecontrollerdb.txt](https://github.com/mdqinc/SDL_GameControllerDB) file located in the same directory as the application binary.
@@ -117,7 +120,7 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
 - **Rewind**: Hold the configured rewind hotkey (`Backspace` by default) or a mapped gamepad shortcut to step backwards through recent gameplay.
 - **Overscan**: For a precise representation of the original image, select **Overscan** `Top+Bottom` and **Aspect Ratio** `Standard (4:3 DAR)` in the **Video** menu.
 - **Mouse Cursor**: Automatically hides when hovering over the main output window or when Main Menu is disabled.
-- **Portable Mode**: Create an empty file named `portable.ini` in the same directory as the application binary to enable portable mode.
+- **Portable Mode**: Create an empty file named `portable.ini` in the same directory as the application binary to enable portable mode. On macOS, place the file next to the `.app` bundle.
 
 ### Debugging Features
 - **Docking Windows**: In debug mode, you can dock windows together by pressing SHIFT and dragging a window onto another.
@@ -139,6 +142,8 @@ Options:
   -w, --windowed           Start in windowed mode with menu visible
       --mcp-stdio          Auto-start MCP server with stdio transport
       --mcp-http           Auto-start MCP server with HTTP transport
+      --mcp-router         Enable compact MCP tool routing
+      --mcp-http-address A HTTP bind address (default: 127.0.0.1)
       --mcp-http-port N    HTTP port for MCP server (default: 7777)
       --headless           Run without GUI (requires --mcp-stdio or --mcp-http)
   -v, --version            Display version information
@@ -147,7 +152,7 @@ Options:
 
 ### MCP Server
 
-Gearcoleco includes a [Model Context Protocol](https://modelcontextprotocol.io/introduction) (MCP) server that enables AI-assisted debugging through AI agents like GitHub Copilot, Claude, Codex and similar. The server provides tools for execution control, memory inspection, breakpoints, disassembly, hardware status, and more.
+Gearcoleco includes a [Model Context Protocol](https://modelcontextprotocol.io/introduction) (MCP) server that enables AI-assisted debugging through AI agents like GitHub Copilot, Claude, Codex and similar. The server provides tools for execution control, memory inspection, breakpoints, disassembly, hardware status, and more. STDIO and HTTP transports are supported, with STDIO preferred.
 
 For complete setup instructions and tool documentation, see [MCP_README.md](MCP_README.md).
 
@@ -164,7 +169,7 @@ Install with `npx skills add drhelius/gearcoleco`. See the [skills README](skill
 
 ### Windows
 
-- Install Microsoft Visual Studio Community 2022 or later.
+- Install Microsoft Visual Studio Community 2026 or later.
 - Download the latest SDL3 VC development libraries from [SDL3 Releases](https://github.com/libsdl-org/SDL/releases) (the file named `SDL3-devel-x.y.z-VC.zip`).
 - Extract the archive and rename the resulting folder (e.g. `SDL3-x.y.z`) to `SDL3`.
 - Place the `SDL3` folder inside `platforms/windows/dependencies/` so that the include path is `platforms/windows/dependencies/SDL3/include/SDL3/`.

@@ -1,3 +1,17 @@
+gearcoleco (1.6.8-1~ppa1) UNRELEASED; urgency=medium
+
+  * New upstream release 1.6.8.
+  * Improve the embedded MCP server, including protocol validation,
+    tool discovery and annotations, routing, and HTTP transport reliability.
+  * Add run-ahead support for reduced input latency.
+  * Add Variable Refresh Rate support.
+  * Add additional disassembler syntaxes.
+  * Add configurable screen-saver behavior.
+  * Associate ColecoVision ROM files with the desktop application.
+  * Include assorted emulation, debugger, user-interface, and stability fixes.
+
+ -- John Grimm, also known as Reaper <JohnGrimmReaper@disroot.org>  Mon, 27 Jul 2026 01:20:10 +0000
+
 gearcoleco (1.6.3-1~ppa1) UNRELEASED; urgency=medium
 
   * Initial PPA build.

@@ -18,29 +18,29 @@ This server provides tools for ColecoVision game development, rom hacking, rever
     <tr>
       <td rowspan="2"><strong>Windows</strong></td>
       <td>x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.3/Gearcoleco-1.6.3-mcpb-windows-x64.mcpb">Gearcoleco-1.6.3-mcpb-windows-x64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-mcpb-windows-x64.mcpb">Gearcoleco-1.6.8-mcpb-windows-x64.mcpb</a></td>
     </tr>
     <tr>
       <td>ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.3/Gearcoleco-1.6.3-mcpb-windows-arm64.mcpb">Gearcoleco-1.6.3-mcpb-windows-arm64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-mcpb-windows-arm64.mcpb">Gearcoleco-1.6.8-mcpb-windows-arm64.mcpb</a></td>
     </tr>
     <tr>
       <td rowspan="2"><strong>macOS</strong></td>
       <td>x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.3/Gearcoleco-1.6.3-mcpb-macos-x64.mcpb">Gearcoleco-1.6.3-mcpb-macos-x64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-mcpb-macos-x64.mcpb">Gearcoleco-1.6.8-mcpb-macos-x64.mcpb</a></td>
     </tr>
     <tr>
       <td>ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.3/Gearcoleco-1.6.3-mcpb-macos-arm64.mcpb">Gearcoleco-1.6.3-mcpb-macos-arm64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-mcpb-macos-arm64.mcpb">Gearcoleco-1.6.8-mcpb-macos-arm64.mcpb</a></td>
     </tr>
     <tr>
       <td rowspan="2"><strong>Linux</strong></td>
       <td>x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.3/Gearcoleco-1.6.3-mcpb-linux-x64.mcpb">Gearcoleco-1.6.3-mcpb-linux-x64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-mcpb-linux-x64.mcpb">Gearcoleco-1.6.8-mcpb-linux-x64.mcpb</a></td>
     </tr>
     <tr>
       <td>ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.3/Gearcoleco-1.6.3-mcpb-linux-arm64.mcpb">Gearcoleco-1.6.3-mcpb-linux-arm64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-mcpb-linux-arm64.mcpb">Gearcoleco-1.6.8-mcpb-linux-arm64.mcpb</a></td>
     </tr>
   </tbody>
 </table>
@@ -53,7 +53,7 @@ This server provides tools for ColecoVision game development, rom hacking, rever
 - Z80 CPU register read/write
 - Hardware state inspection: TMS9918 VDP registers/status, SN76489 PSG, AY-3-8910 (SGM)
 - Sprite listing and PNG image capture
-- Debug symbols management (load, add, remove, list)
+- Debug symbols management (load, add, remove, list, look up)
 - Disassembler bookmarks and call stack inspection
 - Memory editor: bookmarks, watches, memory search, byte finding
 - Trace logger: CPU instructions, IRQs, VDP writes/status, PSG, AY-3-8910, I/O ports, SGM
@@ -61,6 +61,7 @@ This server provides tools for ColecoVision game development, rom hacking, rever
 - Screenshot capture as base64-encoded PNG
 - Save state management (5 slots)
 - Controller input (directional, keypad 0-9, *, #, blue, purple, left/right buttons)
+- Effective input state inspection, including pending tap releases
 - Fast forward control
 - GUI integration (works with or without the GUI running)
 - Two transport modes: STDIO (for AI tool integration) and HTTP (for remote access)
@@ -75,6 +76,33 @@ The server listens for HTTP POST requests on a configurable port (default: 7777)
 
 ### Headless Mode
 Run the emulator without a GUI, using only the MCP server for control. Ideal for automated testing and CI/CD.
+
+## MCP Tool Router
+
+By default, Gearcoleco exposes every MCP tool directly. This avoids nested tool discovery in clients that already defer MCP schemas, including Claude Code.
+
+Add `--mcp-router` to expose a compact set of high-frequency tools directly and route advanced debugger tools through lightweight discovery tools. This reduces MCP context while preserving access to the full debugger surface.
+
+Direct tools in routed mode: `load_media`, `get_media_info`, `debug_pause`, `debug_continue`, `debug_step_into`, `get_z80_status`, `read_memory`, `write_memory`, `get_disassembly`, `set_breakpoint`, `get_screenshot`, and `controller_button`.
+
+Router tools:
+
+- `list_tool_categories` lists routed tool categories with descriptions and tool counts.
+- `get_category_tools` lists routed tools in a category with compact descriptions.
+- `search_tools` searches direct and routed tools and returns compact category/tool/description matches.
+- `get_tool_info` returns one tool's real input schema and metadata.
+- `execute_tool` executes a routed tool by name. First use `search_tools` or `get_category_tools` to discover the tool, then call `get_tool_info` to obtain its exact input schema.
+
+Example routed call:
+
+```json
+{
+  "name": "get_vdp_status",
+  "arguments": {}
+}
+```
+
+Without `--mcp-router`, call every MCP tool directly.
 
 ## Quick Start
 
@@ -157,52 +185,96 @@ Restart Claude Desktop after saving the configuration.
 
 ### HTTP Mode
 
-1. Start Gearcoleco manually with HTTP transport:
+1. **Start the emulator manually** with HTTP transport:
 
    ```bash
    ./gearcoleco --mcp-http
-   # Server starts on http://localhost:7777/mcp
+  ```
 
+  The default endpoint is `http://127.0.0.1:7777/mcp`.
+
+  To use a custom port:
+
+  ```bash
    ./gearcoleco --mcp-http --mcp-http-port 3000
-   # Server starts on http://localhost:3000/mcp
+  ```
+
+  To bind to a custom address, set a bearer token first:
+
+  ```bash
+  GEARCOLECO_MCP_HTTP_TOKEN="change-this-token" ./gearcoleco --mcp-http --mcp-http-address 0.0.0.0 --mcp-http-port 3000
    ```
 
-   You can also start the HTTP server from the debugger's MCP Server menu.
+  Clients must connect using the server's actual interface address, such as `http://192.168.1.50:3000/mcp`, not `0.0.0.0` or a spoofed loopback address.
 
-2. Configure VS Code `.vscode/mcp.json`:
+  You can also start the server using the "MCP" menu in the GUI.
+
+2. **Configure bearer-token authentication**:
+
+  Set `GEARCOLECO_MCP_HTTP_TOKEN` before starting HTTP mode. Authentication is optional for loopback binds and required for wildcard or other non-loopback binds.
+
+  macOS and Linux:
+
+  ```bash
+  GEARCOLECO_MCP_HTTP_TOKEN="change-this-token" ./gearcoleco --mcp-http
+  ```
+
+  Windows PowerShell:
+
+  ```powershell
+  $env:GEARCOLECO_MCP_HTTP_TOKEN = "change-this-token"
+  .\gearcoleco.exe --mcp-http
+  ```
+
+  Windows Command Prompt:
+
+  ```cmd
+  set GEARCOLECO_MCP_HTTP_TOKEN=change-this-token
+  gearcoleco.exe --mcp-http
+  ```
+
+3. **Configure VS Code** `.vscode/mcp.json`:
 
    ```json
    {
      "servers": {
        "gearcoleco": {
          "type": "http",
-         "url": "http://localhost:7777/mcp",
-         "headers": {}
+         "url": "http://127.0.0.1:7777/mcp",
+         "headers": {
+           "Authorization": "Bearer change-this-token"
+         }
        }
      }
    }
    ```
 
-3. Or configure Claude Desktop:
+4. **Or configure Claude Desktop**:
 
    ```json
    {
      "mcpServers": {
        "gearcoleco": {
          "type": "http",
-         "url": "http://localhost:7777/mcp"
+         "url": "http://127.0.0.1:7777/mcp",
+         "headers": {
+           "Authorization": "Bearer change-this-token"
+         }
        }
      }
    }
    ```
 
-4. Or configure Claude Code:
+5. **Or configure Claude Code**:
 
    ```bash
-   claude mcp add --transport http gearcoleco http://localhost:7777/mcp
+  claude mcp add --transport http gearcoleco http://127.0.0.1:7777/mcp
    ```
 
-> **Note:** The MCP HTTP server must be running before connecting the AI client.
+6. **Restart your AI client** and start debugging
+
+> **Note:** The MCP HTTP Server must be running standalone before connecting the AI client.
+> **Security:** Without `GEARCOLECO_MCP_HTTP_TOKEN`, HTTP mode starts only on a loopback address. Wildcard and other non-loopback binds are refused. `Host` and browser `Origin` values are matched to the connection's actual destination address to prevent DNS rebinding and address spoofing.
 
 ## Usage Examples
 
@@ -230,6 +302,8 @@ Once configured, you can ask your AI assistant:
 
 ## Available MCP Tools
 
+This is the full tool catalog. All tools are exposed directly by default. With `--mcp-router`, discover advanced tools through `search_tools` or `get_category_tools`, inspect their schemas with `get_tool_info`, then invoke them with `execute_tool`.
+
 ### Execution Control
 | Tool | Description |
 |------|-------------|
@@ -238,7 +312,7 @@ Once configured, you can ask your AI assistant:
 | `debug_step_into` | Step one instruction |
 | `debug_step_over` | Step over calls |
 | `debug_step_out` | Step out of current call |
-| `debug_step_frame` | Step one full frame |
+| `debug_step_frame` | Step one or more frames |
 | `debug_reset` | Reset the ColecoVision system |
 | `debug_get_status` | Get current debug state |
 
@@ -265,6 +339,8 @@ Once configured, you can ask your AI assistant:
 | `add_symbol` / `remove_symbol` | Manage debug symbols |
 | `load_symbols` | Load symbols from file |
 | `list_symbols` | List all symbols |
+| `lookup_symbol_by_name` | Find all exact-name symbol matches |
+| `lookup_symbol_at_address` | Find symbol at bank/address |
 | `get_call_stack` | Get current call stack |
 
 ### Breakpoints
@@ -300,6 +376,7 @@ Once configured, you can ask your AI assistant:
 | `list_save_state_slots` | List save state slots |
 | `select_save_state_slot` | Select active slot |
 | `save_state` / `load_state` | Save/load state |
+| `save_state_file` / `load_state_file` | Save/load state at an explicit file path |
 | `set_fast_forward_speed` | Set fast forward multiplier |
 | `toggle_fast_forward` | Toggle fast forward |
 | `get_rewind_status` | Get rewind buffer status |
@@ -315,6 +392,8 @@ Once configured, you can ask your AI assistant:
 | Tool | Description |
 |------|-------------|
 | `controller_button` | Press/release controller buttons (directional, keypad, yellow/red, blue/purple) |
+| `controller_macro` | Run ordered `tap`, `press`, `release`, and `wait` input commands |
+| `get_input_state` | Get effective pressed buttons and pending tap releases |
 
 ### Memory Editor
 | Tool | Description |

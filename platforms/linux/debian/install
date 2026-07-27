@@ -1,2 +1,3 @@
 platforms/linux/gearcoleco usr/lib/gearcoleco/
 debian/gearcoleco.desktop usr/share/applications/
+debian/gearcoleco.xml usr/share/mime/packages/

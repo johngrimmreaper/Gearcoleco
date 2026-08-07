@@ -62,6 +62,7 @@ static bool categories_supported = false;
 static GearcolecoCore* core;
 static u8* frame_buffer;
 static Cartridge::ForceConfiguration config;
+static const retro_vfs_interface* vfs_interface = NULL;
 
 static int joypad[MAX_PADS][JOYPAD_BUTTONS];
 static int joypre[MAX_PADS][JOYPAD_BUTTONS];
@@ -135,6 +136,18 @@ void retro_init(void)
 
     log_cb(RETRO_LOG_INFO, "%s (%s) libretro\n", GEARCOLECO_TITLE, EMULATOR_BUILD);
 
+    struct retro_vfs_interface_info vfs_interface_info = {};
+    vfs_interface_info.required_interface_version = 1;
+    vfs_interface_info.iface = NULL;
+
+    if (environ_cb(RETRO_ENVIRONMENT_GET_VFS_INTERFACE, &vfs_interface_info) &&
+        vfs_interface_info.iface && vfs_interface_info.iface->open &&
+        vfs_interface_info.iface->close && vfs_interface_info.iface->size &&
+        vfs_interface_info.iface->read)
+        vfs_interface = vfs_interface_info.iface;
+    else
+        vfs_interface = NULL;
+
     core = new GearcolecoCore();
 
 #ifdef PS2
@@ -162,6 +175,7 @@ void retro_deinit(void)
 {
     SafeDeleteArray(frame_buffer);
     SafeDelete(core);
+    vfs_interface = NULL;
 
     audio_sample_count = 0;
     current_screen_width = 0;
@@ -379,21 +393,71 @@ void retro_set_video_refresh(retro_video_refresh_t cb)
     video_cb = cb;
 }
 
+static bool load_bios_file(const char* path)
+{
+    if (!vfs_interface)
+    {
+        core->GetMemory()->LoadBios(path);
+        return core->GetMemory()->IsBiosLoaded();
+    }
+
+    core->GetMemory()->UnloadBios();
+
+    retro_vfs_file_handle* file = vfs_interface->open(path, RETRO_VFS_FILE_ACCESS_READ,
+        RETRO_VFS_FILE_ACCESS_HINT_NONE);
+    if (!file)
+    {
+        log_cb(RETRO_LOG_ERROR, "There was a problem opening the file %s\n", path);
+        return false;
+    }
+
+    s64 size = (s64)vfs_interface->size(file);
+    if (size != 0x2000)
+    {
+        log_cb(RETRO_LOG_ERROR, "Incorrect BIOS size %lld: %s\n", (long long)size, path);
+        vfs_interface->close(file);
+        return false;
+    }
+
+    u8 bios[0x2000];
+    s64 total = 0;
+
+    while (total < size)
+    {
+        s64 read = (s64)vfs_interface->read(file, bios + total, size - total);
+        if (read <= 0)
+            break;
+
+        total += read;
+    }
+
+    vfs_interface->close(file);
+
+    if ((total != size) || !core->GetMemory()->LoadBiosFromBuffer(bios, (int)size))
+    {
+        log_cb(RETRO_LOG_ERROR, "There was a problem reading the BIOS file %s\n", path);
+        return false;
+    }
+
+    log_cb(RETRO_LOG_INFO, "BIOS %s loaded (%lld bytes)\n", path, (long long)size);
+    return true;
+}
+
 static void load_bootroms(void)
 {
     char bios_path[4113];
 
     snprintf(bios_path, 4113, "%s%ccolecovision.rom", retro_system_directory, slash);
-    core->GetMemory()->LoadBios(bios_path);
+    bool bios_loaded = load_bios_file(bios_path);
 
-    if (!core->GetMemory()->IsBiosLoaded())
+    if (!bios_loaded)
     {
         // Fallback to coleco.rom if colecovision.rom is not found
         snprintf(bios_path, 4113, "%s%ccoleco.rom", retro_system_directory, slash);
-        core->GetMemory()->LoadBios(bios_path);
+        bios_loaded = load_bios_file(bios_path);
     }
 
-    if (!core->GetMemory()->IsBiosLoaded())
+    if (!bios_loaded)
     {
         struct retro_message msg = {};
         msg.msg = "BIOS not found: coleco.rom";
@@ -605,13 +669,9 @@ static void update_input(void)
 
         if (mouse[0])
             core->KeyPressed(Controller_1, Key_Left_Button);
-        else
-            core->KeyReleased(Controller_1, Key_Left_Button);
 
         if (mouse[1])
             core->KeyPressed(Controller_1, Key_Right_Button);
-        else
-            core->KeyReleased(Controller_1, Key_Right_Button);
     }
 }
 
@@ -764,13 +824,62 @@ void retro_reset(void)
     core->ResetROMPreservingRAM(&config);
 }
 
+static bool load_rom(const struct retro_game_info* info)
+{
+    if (!info)
+        return false;
+
+    if (IsValidPointer(info->data) && (info->size > 0))
+        return core->LoadROMFromBuffer(reinterpret_cast<const u8*>(info->data), info->size, &config);
+
+    if (!info->path || !info->path[0])
+        return false;
+
+    if (!vfs_interface)
+        return core->LoadROM(info->path, &config);
+
+    retro_vfs_file_handle* file = vfs_interface->open(info->path, RETRO_VFS_FILE_ACCESS_READ,
+        RETRO_VFS_FILE_ACCESS_HINT_NONE);
+    if (!file)
+        return false;
+
+    s64 size = (s64)vfs_interface->size(file);
+    if ((size <= 0) || (size > 0x7FFFFFFF))
+    {
+        vfs_interface->close(file);
+        return false;
+    }
+
+    u8* buffer = new u8[(int)size];
+    s64 total = 0;
+
+    while (total < size)
+    {
+        s64 read = (s64)vfs_interface->read(file, buffer + total, size - total);
+        if (read <= 0)
+            break;
+
+        total += read;
+    }
+
+    bool loaded = vfs_interface->close(file) == 0 && total == size;
+    if (loaded)
+        loaded = core->LoadROMFromBuffer(buffer, (int)size, &config);
+
+    SafeDeleteArray(buffer);
+    return loaded;
+}
+
 bool retro_load_game(const struct retro_game_info *info)
 {
+    if (!info)
+        return false;
+
     core->GetCartridge()->Reset();
     check_variables();
     load_bootroms();
 
-    if (!core->LoadROMFromBuffer(reinterpret_cast<const u8*>(info->data), info->size, &config))
+    if (!load_rom(info))
     {
         log_cb(RETRO_LOG_ERROR, "Invalid or corrupted ROM.\n");
         return false;

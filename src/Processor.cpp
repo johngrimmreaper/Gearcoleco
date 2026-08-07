@@ -41,6 +41,8 @@ Processor::Processor(Memory* pMemory)
     m_iTStates = 0;
     m_iInjectedTStates = 0;
     m_bAfterEI = false;
+    m_Q = 0;
+    m_QTemp = 0;
     m_iInterruptMode = 0;
     m_bINTRequested = false;
     m_bNMIRequested = false;
@@ -110,7 +112,7 @@ void Processor::Reset()
     m_iTStates = 0;
     m_iInjectedTStates = 0;
     m_bAfterEI = false;
-    m_iInterruptMode = 1;
+    m_iInterruptMode = 0;
     PC.SetValue(0x0000);
     SP.SetValue(0xDFF0);
     IX.SetValue(0xFFFF);
@@ -126,6 +128,8 @@ void Processor::Reset()
     WZ.SetValue(0x0000);
     I = 0x00;
     R = 0x00;
+    m_Q = 0;
+    m_QTemp = 0;
     m_bINTRequested = false;
     m_bNMIRequested = false;
     m_bPrefixedCBOpcode = false;
@@ -204,20 +208,33 @@ unsigned int Processor::RunFor(unsigned int tstates)
 #if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
                 u16 pc = PC.GetValue();
 #endif
+                // The interrupt acknowledge bus floats high, so IM 0 receives RST 38h.
+                u16 interrupt_vector = 0x0038;
+                unsigned int interrupt_tstates = 13;
+
+                if (m_iInterruptMode == 2)
+                {
+                    u16 vector_address = (I << 8) | 0x00FF;
+                    u8 l = m_pMemory->Read(vector_address);
+                    u8 h = m_pMemory->Read(static_cast<u16> (vector_address + 1));
+                    interrupt_vector = (h << 8) | l;
+                    interrupt_tstates = 19;
+                }
+
                 StackPush(&PC);
-                PC.SetValue(0x0038);
-                m_iTStates += 13;
+                PC.SetValue(interrupt_vector);
+                m_iTStates += interrupt_tstates;
                 IncreaseR();
                 WZ.SetValue(PC.GetValue());
 #if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
                 m_debug_next_irq = 3;
-                PushCallStack(pc, 0x0038, pc, 0);
+                PushCallStack(pc, interrupt_vector, pc, m_pMemory->GetBank(interrupt_vector));
                 if (m_pTraceLogger && m_pTraceLogger->IsEnabled(TRACE_CPU_IRQ))
                 {
                     GC_Trace_Entry e = {};
                     e.type = TRACE_CPU_IRQ;
                     e.irq.pc = pc;
-                    e.irq.vector = 0x0038;
+                    e.irq.vector = interrupt_vector;
                     e.irq.type = 3;
                     m_pTraceLogger->TraceLog(e);
                 }
@@ -233,7 +250,10 @@ unsigned int Processor::RunFor(unsigned int tstates)
         u16 prev_pc = PC.GetValue();
 #endif
 
-        ExecuteOPCode();
+        if (m_bInputLastCycle)
+            ExecuteInputLastCycle();
+        else
+            ExecuteOPCode();
         DisassembleNextOPCode();
 
 #if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
@@ -342,6 +362,8 @@ void Processor::ExecuteOPCode()
             IncreaseR();
             IncreaseR();
 
+            if (IsPrefixedInstruction())
+                m_iTStates += 4;
             m_CurrentPrefix = 0x00;
             opcode = FetchOPCode();
 
@@ -964,9 +986,11 @@ void Processor::SaveState(std::ostream& stream)
     stream.write(reinterpret_cast<const char*> (&m_bPrefixedCBOpcode), sizeof(m_bPrefixedCBOpcode));
     stream.write(reinterpret_cast<const char*> (&m_PrefixedCBValue), sizeof(m_PrefixedCBValue));
     stream.write(reinterpret_cast<const char*> (&m_bInputLastCycle), sizeof(m_bInputLastCycle));
+    stream.write(reinterpret_cast<const char*> (&m_Q), sizeof(m_Q));
+    stream.write(reinterpret_cast<const char*> (&m_QTemp), sizeof(m_QTemp));
 }
 
-void Processor::LoadState(std::istream& stream)
+void Processor::LoadState(std::istream& stream, int version)
 {
     using namespace std;
 
@@ -1019,6 +1043,17 @@ void Processor::LoadState(std::istream& stream)
     stream.read(reinterpret_cast<char*> (&m_bPrefixedCBOpcode), sizeof(m_bPrefixedCBOpcode));
     stream.read(reinterpret_cast<char*> (&m_PrefixedCBValue), sizeof(m_PrefixedCBValue));
     stream.read(reinterpret_cast<char*> (&m_bInputLastCycle), sizeof(m_bInputLastCycle));
+
+    if (version >= 105)
+    {
+        stream.read(reinterpret_cast<char*> (&m_Q), sizeof(m_Q));
+        stream.read(reinterpret_cast<char*> (&m_QTemp), sizeof(m_QTemp));
+    }
+    else
+    {
+        m_Q = 0;
+        m_QTemp = 0;
+    }
 }
 
 Processor::ProcessorState* Processor::GetState()

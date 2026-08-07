@@ -18,29 +18,29 @@ This server provides tools for ColecoVision game development, rom hacking, rever
     <tr>
       <td rowspan="2"><strong>Windows</strong></td>
       <td>x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-mcpb-windows-x64.mcpb">Gearcoleco-1.6.8-mcpb-windows-x64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-mcpb-windows-x64.mcpb">Gearcoleco-1.6.9-mcpb-windows-x64.mcpb</a></td>
     </tr>
     <tr>
       <td>ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-mcpb-windows-arm64.mcpb">Gearcoleco-1.6.8-mcpb-windows-arm64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-mcpb-windows-arm64.mcpb">Gearcoleco-1.6.9-mcpb-windows-arm64.mcpb</a></td>
     </tr>
     <tr>
       <td rowspan="2"><strong>macOS</strong></td>
       <td>x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-mcpb-macos-x64.mcpb">Gearcoleco-1.6.8-mcpb-macos-x64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-mcpb-macos-x64.mcpb">Gearcoleco-1.6.9-mcpb-macos-x64.mcpb</a></td>
     </tr>
     <tr>
       <td>ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-mcpb-macos-arm64.mcpb">Gearcoleco-1.6.8-mcpb-macos-arm64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-mcpb-macos-arm64.mcpb">Gearcoleco-1.6.9-mcpb-macos-arm64.mcpb</a></td>
     </tr>
     <tr>
       <td rowspan="2"><strong>Linux</strong></td>
       <td>x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-mcpb-linux-x64.mcpb">Gearcoleco-1.6.8-mcpb-linux-x64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-mcpb-linux-x64.mcpb">Gearcoleco-1.6.9-mcpb-linux-x64.mcpb</a></td>
     </tr>
     <tr>
       <td>ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-mcpb-linux-arm64.mcpb">Gearcoleco-1.6.8-mcpb-linux-arm64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-mcpb-linux-arm64.mcpb">Gearcoleco-1.6.9-mcpb-linux-arm64.mcpb</a></td>
     </tr>
   </tbody>
 </table>
@@ -76,6 +76,18 @@ The server listens for HTTP POST requests on a configurable port (default: 7777)
 
 ### Headless Mode
 Run the emulator without a GUI, using only the MCP server for control. Ideal for automated testing and CI/CD.
+
+### Concurrent Clients
+
+The HTTP server accepts repeated valid MCP initialization requests. All connected clients control the same Gearcoleco instance. Individual HTTP requests are serialized, but multi-request debugging workflows are not atomic. Concurrent agents can interfere with each other through pauses, resets, breakpoints, memory writes, media loads, and save states.
+
+For independent agent tasks, run one Gearcoleco instance per agent on a unique HTTP port. Use `--headless` and give each instance its own portable application directory so its configuration and runtime files are isolated:
+
+```bash
+./gearcoleco --mcp-http --headless --portable --mcp-http-port 7778
+```
+
+The `--portable` option stores configuration and user data beside the application. Alternatively, create an empty `portable.ini` beside the executable in each application directory. On macOS, place it next to each `.app` bundle.
 
 ## MCP Tool Router
 

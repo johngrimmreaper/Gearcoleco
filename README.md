@@ -30,11 +30,11 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
     <tr>
       <td rowspan="2"><strong>Windows</strong></td>
       <td>Desktop x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-desktop-windows-x64.zip">Gearcoleco-1.6.8-desktop-windows-x64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-desktop-windows-x64.zip">Gearcoleco-1.6.9-desktop-windows-x64.zip</a></td>
     </tr>
     <tr>
       <td>Desktop ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-desktop-windows-arm64.zip">Gearcoleco-1.6.8-desktop-windows-arm64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-desktop-windows-arm64.zip">Gearcoleco-1.6.9-desktop-windows-arm64.zip</a></td>
     </tr>
     <tr>
       <td rowspan="3"><strong>macOS</strong></td>
@@ -43,11 +43,11 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
     </tr>
     <tr>
       <td>Desktop Apple Silicon</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-desktop-macos-arm64.zip">Gearcoleco-1.6.8-desktop-macos-arm64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-desktop-macos-arm64.zip">Gearcoleco-1.6.9-desktop-macos-arm64.zip</a></td>
     </tr>
     <tr>
       <td>Desktop Intel</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-desktop-macos-intel.zip">Gearcoleco-1.6.8-desktop-macos-intel.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-desktop-macos-intel.zip">Gearcoleco-1.6.9-desktop-macos-intel.zip</a></td>
     </tr>
     <tr>
       <td rowspan="5"><strong>Linux</strong></td>
@@ -60,15 +60,15 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
     </tr>
     <tr>
       <td>Desktop Ubuntu 24.04 x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-desktop-ubuntu24.04-x64.zip">Gearcoleco-1.6.8-desktop-ubuntu24.04-x64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-desktop-ubuntu24.04-x64.zip">Gearcoleco-1.6.9-desktop-ubuntu24.04-x64.zip</a></td>
     </tr>
     <tr>
       <td>Desktop Ubuntu 22.04 x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-desktop-ubuntu22.04-x64.zip">Gearcoleco-1.6.8-desktop-ubuntu22.04-x64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-desktop-ubuntu22.04-x64.zip">Gearcoleco-1.6.9-desktop-ubuntu22.04-x64.zip</a></td>
     </tr>
     <tr>
       <td>Desktop Ubuntu 24.04 ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.8/Gearcoleco-1.6.8-desktop-ubuntu24.04-arm64.zip">Gearcoleco-1.6.8-desktop-ubuntu24.04-arm64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-desktop-ubuntu24.04-arm64.zip">Gearcoleco-1.6.9-desktop-ubuntu24.04-arm64.zip</a></td>
     </tr>
     <tr>
       <td><strong>MCPB</strong></td>
@@ -120,7 +120,7 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
 - **Rewind**: Hold the configured rewind hotkey (`Backspace` by default) or a mapped gamepad shortcut to step backwards through recent gameplay.
 - **Overscan**: For a precise representation of the original image, select **Overscan** `Top+Bottom` and **Aspect Ratio** `Standard (4:3 DAR)` in the **Video** menu.
 - **Mouse Cursor**: Automatically hides when hovering over the main output window or when Main Menu is disabled.
-- **Portable Mode**: Create an empty file named `portable.ini` in the same directory as the application binary to enable portable mode. On macOS, place the file next to the `.app` bundle.
+- **Portable Mode**: Run with `--portable`, or create an empty file named `portable.ini` in the same directory as the application binary. On macOS, place the file next to the `.app` bundle.
 
 ### Debugging Features
 - **Docking Windows**: In debug mode, you can dock windows together by pressing SHIFT and dragging a window onto another.
@@ -146,6 +146,7 @@ Options:
       --mcp-http-address A HTTP bind address (default: 127.0.0.1)
       --mcp-http-port N    HTTP port for MCP server (default: 7777)
       --headless           Run without GUI (requires --mcp-stdio or --mcp-http)
+        --portable           Store configuration and user data beside the application
   -v, --version            Display version information
   -h, --help               Display this help message
 ```

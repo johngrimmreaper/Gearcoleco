@@ -1,3 +1,16 @@
+gearcoleco (1.6.9-1) UNRELEASED; urgency=medium
+
+  * Extensive Z80 accuracy improvements
+  * Added command-line option for portable mode
+  * Improved MCP Server implementation
+  * libretro VFS support
+  * Improved compatibility in Dev Containers
+  * Fixed issues with mouse and controller fire button
+  * Updated Game Controller DB
+  * Many bug fixes and improvements
+
+ -- Reaper <JohnGrimmReaper@disroot.org>  Fri, 7 Aug 2026 13:01:10 +0000
+
 gearcoleco (1.6.8-1) UNRELEASED; urgency=medium
 
   * [mcp] Hardened server protocol compliance with version negotiation

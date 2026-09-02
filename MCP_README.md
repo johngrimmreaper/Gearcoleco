@@ -18,29 +18,29 @@ This server provides tools for ColecoVision game development, rom hacking, rever
     <tr>
       <td rowspan="2"><strong>Windows</strong></td>
       <td>x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-mcpb-windows-x64.mcpb">Gearcoleco-1.6.9-mcpb-windows-x64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-mcpb-windows-x64.mcpb">Gearcoleco-1.6.13-mcpb-windows-x64.mcpb</a></td>
     </tr>
     <tr>
       <td>ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-mcpb-windows-arm64.mcpb">Gearcoleco-1.6.9-mcpb-windows-arm64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-mcpb-windows-arm64.mcpb">Gearcoleco-1.6.13-mcpb-windows-arm64.mcpb</a></td>
     </tr>
     <tr>
       <td rowspan="2"><strong>macOS</strong></td>
       <td>x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-mcpb-macos-x64.mcpb">Gearcoleco-1.6.9-mcpb-macos-x64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-mcpb-macos-x64.mcpb">Gearcoleco-1.6.13-mcpb-macos-x64.mcpb</a></td>
     </tr>
     <tr>
       <td>ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-mcpb-macos-arm64.mcpb">Gearcoleco-1.6.9-mcpb-macos-arm64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-mcpb-macos-arm64.mcpb">Gearcoleco-1.6.13-mcpb-macos-arm64.mcpb</a></td>
     </tr>
     <tr>
       <td rowspan="2"><strong>Linux</strong></td>
       <td>x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-mcpb-linux-x64.mcpb">Gearcoleco-1.6.9-mcpb-linux-x64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-mcpb-linux-x64.mcpb">Gearcoleco-1.6.13-mcpb-linux-x64.mcpb</a></td>
     </tr>
     <tr>
       <td>ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-mcpb-linux-arm64.mcpb">Gearcoleco-1.6.9-mcpb-linux-arm64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-mcpb-linux-arm64.mcpb">Gearcoleco-1.6.13-mcpb-linux-arm64.mcpb</a></td>
     </tr>
   </tbody>
 </table>
@@ -56,7 +56,7 @@ This server provides tools for ColecoVision game development, rom hacking, rever
 - Debug symbols management (load, add, remove, list, look up)
 - Disassembler bookmarks and call stack inspection
 - Memory editor: bookmarks, watches, memory search, byte finding
-- Trace logger: CPU instructions, IRQs, VDP writes/status, PSG, AY-3-8910, I/O ports, SGM
+- Trace logger: CPU instructions, VDP, PSG, AY-3-8910, I/O, input, SGM, mapper, EEPROM, and SRAM events
 - Rewind (time travel debugging)
 - Screenshot capture as base64-encoded PNG
 - Save state management (5 slots)
@@ -324,7 +324,7 @@ This is the full tool catalog. All tools are exposed directly by default. With `
 | `debug_step_into` | Step one instruction |
 | `debug_step_over` | Step over calls |
 | `debug_step_out` | Step out of current call |
-| `debug_step_frame` | Step one or more frames |
+| `debug_step_frame` | Step one or more frames. Optional `frames` is 1-1000 (default 1). Optional `mode` is `async` (default, returns after scheduling) or `sync` (returns after all requested frames complete at VBlank). Use `mode: "sync"` when issuing dependent tool calls. |
 | `debug_reset` | Reset the ColecoVision system |
 | `debug_get_status` | Get current debug state |
 
@@ -397,8 +397,14 @@ This is the full tool catalog. All tools are exposed directly by default. With `
 ### Tracing
 | Tool | Description |
 |------|-------------|
-| `get_trace_log` | Get trace log entries |
-| `set_trace_log` | Enable/disable trace logging with type flags |
+| `get_trace_log` | Read formatted trace lines using absolute sequence pagination |
+| `set_trace_log` | Configure shared memory or disk capture with exact event filters |
+
+`get_trace_log` returns `total_entries`, monotonic `total_logged`, `oldest_sequence`, actual `start`, `next_sequence`, `count`, `overrun`, and `lines`. Omit `start` for the latest 100 retained entries, or use a negative value to start that many entries from the retained tail. An expired start clamps to the oldest retained entry with `overrun=true`; a current or future start returns an empty page without changing its identity.
+
+`set_trace_log` accepts `output` (`memory` or `disk`), `memory_size` (`100K`, `500K`, `1M`, `2M`, `5M`), `disk_size` (`10MB`, `50MB`, `100MB`, `250MB`, `500MB`, `1GB`, `unbounded`), and an `output_path` directory. Omitting `filters` selects CPU instructions and interrupts. Disk capture uses a 100K staging ring, flushes continuously, stops on staging overflow or the configured complete-line size limit, and reports write/flush/close failures.
+
+Exact filters are `cpu.instructions`, `cpu.interrupts`, `vdp.registers`, `vdp.interrupts`, `vdp.status`, `vdp.sprites`, `vdp.timing`, `vdp.vram`, `psg.tone`, `psg.volume`, `psg.noise`, `ay8910.registers`, `ay8910.tone`, `ay8910.noise_mixer`, `ay8910.volume`, `ay8910.envelope`, `ay8910.io`, `io.reads`, `io.writes`, `input.reads`, `input.writes`, `sgm.control`, `mapper.banks`, `mapper.eeprom`, and `mapper.sram`. Filters must be non-empty, unique, and exact. Cycle values use the core master clock; `RESET` denotes a clock discontinuity while absolute sequence identity remains monotonic.
 
 ### Controller Input
 | Tool | Description |
@@ -413,7 +419,7 @@ This is the full tool catalog. All tools are exposed directly by default. With `
 | `select_memory_range` / `get_memory_selection` / `set_memory_selection_value` | Range operations |
 | `add_memory_bookmark` / `remove_memory_bookmark` / `list_memory_bookmarks` | Bookmark management |
 | `add_memory_watch` / `remove_memory_watch` / `list_memory_watches` | Watch management |
-| `memory_search_capture` / `memory_search` / `memory_find_bytes` | Memory searching |
+| `memory_search_capture` / `memory_search` / `memory_find` | Search values, hex bytes, or text |
 
 ## Hardware Resources
 

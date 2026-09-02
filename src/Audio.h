@@ -44,7 +44,7 @@ public:
     void SaveState(std::ostream& stream);
     void LoadState(std::istream& stream, int version);
     void LoadStateV1(std::istream& stream);
-    bool StartVgmRecording(const char* file_path, int clock_rate, bool is_pal);
+    bool StartVgmRecording(const char* file_path, int clock_rate, bool is_pal, const VgmMetadata& metadata);
     void StopVgmRecording();
     bool IsVgmRecording() const;
     void EnablePSGDebug(bool enable);
@@ -80,6 +80,10 @@ inline void Audio::Tick(unsigned int clockCycles)
 {
     m_ElapsedCycles += clockCycles;
     m_pAY8910->Tick(clockCycles);
+#ifndef GEARCOLECO_DISABLE_VGMRECORDER
+    if (m_bVgmRecordingEnabled)
+        m_VgmRecorder.UpdateTiming(clockCycles);
+#endif
 }
 
 inline void Audio::WriteAudioRegister(u8 value)

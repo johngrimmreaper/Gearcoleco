@@ -27,6 +27,7 @@
 static u8* runahead_buffer = NULL;
 static s16* runahead_audio = NULL;
 static size_t runahead_buffer_size = 0;
+static bool runahead_buffer_dirty = true;
 
 static bool ensure_buffer(void);
 
@@ -35,6 +36,7 @@ void runahead_init(void)
     runahead_audio = new s16[GC_AUDIO_BUFFER_SIZE];
     runahead_buffer = NULL;
     runahead_buffer_size = 0;
+    runahead_buffer_dirty = true;
 }
 
 void runahead_destroy(void)
@@ -42,13 +44,19 @@ void runahead_destroy(void)
     SafeDeleteArray(runahead_audio);
     SafeDeleteArray(runahead_buffer);
     runahead_buffer_size = 0;
+    runahead_buffer_dirty = true;
+}
+
+void runahead_reset(void)
+{
+    runahead_buffer_dirty = true;
 }
 
 int runahead_get_frames(void)
 {
     int frames = config_emulator.runahead;
 
-    if ((frames <= 0) || config_emulator.ffwd)
+    if ((frames <= 0) || config_emulator.ffwd || config_debug.debug)
         return 0;
 
     return frames;
@@ -59,11 +67,16 @@ void runahead_run(int frames, u8* frame_buffer, s16* sample_buffer, int* sample_
     GearcolecoCore* core = emu_get_core();
 
     // Run the authoritative frame, keeping its audio while the real state advances.
-    core->RunToVBlank(frame_buffer, sample_buffer, sample_count);
+    core->RunToVBlank(frame_buffer, sample_buffer, sample_count, NULL, false);
 
-    // Allocate the reusable snapshot buffer on first use.
-    if (!IsValidPointer(runahead_buffer) && !ensure_buffer())
+    // Recheck the reusable snapshot buffer after content or hardware changes.
+    if ((runahead_buffer_dirty || !IsValidPointer(runahead_buffer)) && !ensure_buffer())
+    {
+        core->RenderFrameBuffer(frame_buffer);
         return;
+    }
+
+    runahead_buffer_dirty = false;
 
     size_t saved_size = runahead_buffer_size;
     if (!core->SaveState(runahead_buffer, saved_size, false))
@@ -71,6 +84,7 @@ void runahead_run(int frames, u8* frame_buffer, s16* sample_buffer, int* sample_
         // The state outgrew the buffer. Grow it once and skip speculation this
         // frame; later frames reuse the larger buffer.
         ensure_buffer();
+        core->RenderFrameBuffer(frame_buffer);
         return;
     }
 
@@ -79,7 +93,8 @@ void runahead_run(int frames, u8* frame_buffer, s16* sample_buffer, int* sample_
     for (int i = 0; i < frames; i++)
     {
         int discarded_samples = 0;
-        core->RunToVBlank(frame_buffer, runahead_audio, &discarded_samples);
+        bool render = (i == (frames - 1));
+        core->RunToVBlank(frame_buffer, runahead_audio, &discarded_samples, NULL, render);
     }
 
     // Roll back to the authoritative frame. If restoring ever fails, the

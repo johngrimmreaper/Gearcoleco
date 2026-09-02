@@ -42,7 +42,9 @@
     <ClCompile Include="..\shared\desktop\gui_debug_psg.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\gui_debug_rewind.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\gui_debug_tms9918.cpp"><Filter>desktop</Filter></ClCompile>
+    <ClCompile Include="..\shared\desktop\gui_debug_f18a.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\gui_debug_trace_logger.cpp"><Filter>desktop</Filter></ClCompile>
+    <ClCompile Include="..\shared\desktop\trace_logger_formatter.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\gui_filedialogs.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\gui_menus.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\gui_popups.cpp"><Filter>desktop</Filter></ClCompile>
@@ -64,6 +66,7 @@
     <ClCompile Include="..\..\src\ColecoVisionIOPorts.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="..\..\src\GearcolecoCore.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="..\..\src\Input.cpp"><Filter>core</Filter></ClCompile>
+    <ClCompile Include="..\..\src\Mapper.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="..\..\src\Memory.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="..\..\src\opcodes.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="..\..\src\opcodes_cb.cpp"><Filter>core</Filter></ClCompile>
@@ -71,7 +74,10 @@
     <ClCompile Include="..\..\src\Processor.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="..\..\src\TraceLogger.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="..\..\src\VgmRecorder.cpp"><Filter>core</Filter></ClCompile>
-    <ClCompile Include="..\..\src\Video.cpp"><Filter>core</Filter></ClCompile>
+    <ClCompile Include="..\..\src\TMS9918A.cpp"><Filter>core</Filter></ClCompile>
+    <ClCompile Include="..\..\src\F18A.cpp"><Filter>core</Filter></ClCompile>
+    <ClCompile Include="..\..\src\F18A_enhancements.cpp"><Filter>core</Filter></ClCompile>
+    <ClCompile Include="..\..\src\F18AGPU.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="..\..\src\audio\Blip_Buffer.cpp"><Filter>core\audio</Filter></ClCompile>
     <ClCompile Include="..\..\src\audio\Effects_Buffer.cpp"><Filter>core\audio</Filter></ClCompile>
     <ClCompile Include="..\..\src\audio\Multi_Buffer.cpp"><Filter>core\audio</Filter></ClCompile>
@@ -93,6 +99,9 @@
     <ClInclude Include="..\shared\desktop\application_headless.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\backers.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\config.h"><Filter>desktop</Filter></ClInclude>
+    <ClInclude Include="..\shared\desktop\config_data.h"><Filter>desktop</Filter></ClInclude>
+    <ClInclude Include="..\shared\desktop\config_definitions.inc.h"><Filter>desktop</Filter></ClInclude>
+    <ClInclude Include="..\shared\desktop\config_macros.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\console_utils.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\display.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\emu.h"><Filter>desktop</Filter></ClInclude>
@@ -111,11 +120,14 @@
     <ClInclude Include="..\shared\desktop\gui_debug_rewind.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui_debug_text.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui_debug_tms9918.h"><Filter>desktop</Filter></ClInclude>
+    <ClInclude Include="..\shared\desktop\gui_debug_f18a.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui_debug_trace_logger.h"><Filter>desktop</Filter></ClInclude>
+    <ClInclude Include="..\shared\desktop\trace_logger_formatter.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui_debug_widgets.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui_filedialogs.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui_menus.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui_popups.h"><Filter>desktop</Filter></ClInclude>
+    <ClInclude Include="..\..\src\ips_patch.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\keyboard.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\license.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\ogl_renderer.h"><Filter>desktop</Filter></ClInclude>
@@ -148,6 +160,7 @@
     <ClInclude Include="..\..\src\MegaCartMapper.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\..\src\Memory.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\..\src\memory_stream.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="..\..\src\random.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\..\src\Memory_inline.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\..\src\no_bios.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\..\src\OCMMapper.h"><Filter>core</Filter></ClInclude>
@@ -168,6 +181,9 @@
     <ClInclude Include="..\..\src\TraceLogger.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\..\src\VgmRecorder.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\..\src\Video.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="..\..\src\TMS9918A.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="..\..\src\F18A.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="..\..\src\F18AGPU.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\..\src\audio\blargg_common.h"><Filter>core\audio</Filter></ClInclude>
     <ClInclude Include="..\..\src\audio\blargg_config.h"><Filter>core\audio</Filter></ClInclude>
     <ClInclude Include="..\..\src\audio\blargg_source.h"><Filter>core\audio</Filter></ClInclude>

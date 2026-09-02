@@ -23,6 +23,7 @@
 #include "Processor.h"
 #include "Cartridge.h"
 #include "Mapper.h"
+#include "StandardMapper.h"
 
 inline u8 Memory::Read(u16 address)
 {
@@ -50,6 +51,8 @@ inline u8 Memory::Read(u16 address)
         case 0xC000:
         case 0xE000:
         {
+            if (IsValidPointer(m_pStandardMapper))
+                return m_pStandardMapper->ReadDirect(address);
             return m_pMapper->Read(address);
         }
         default:
@@ -112,7 +115,10 @@ inline void Memory::Write(u16 address, u8 value)
         case 0xC000:
         case 0xE000:
         {
-            m_pMapper->Write(address, value);
+            if (IsValidPointer(m_pStandardMapper))
+                m_pStandardMapper->WriteDirect(address, value);
+            else
+                m_pMapper->Write(address, value);
             break;
         }
     }
@@ -145,8 +151,25 @@ inline GC_Disassembler_Record* Memory::GetDisassemblerRecord(u16 address, u8 ban
     if (address < 0x8000)
         return GetDisassemblerRecord(address);
 
-    u32 physical_address = 0;
+    u32 physical_address = GetTracePhysicalAddress(address, bank);
+    if (physical_address >= MAX_ROM_SIZE)
+        return NULL;
 
+    return m_pDisassembledRomMap[physical_address];
+
+#else
+    UNUSED(address);
+    UNUSED(bank);
+    return NULL;
+#endif
+}
+
+inline u32 Memory::GetTracePhysicalAddress(u16 address, u8 bank)
+{
+    if (address < 0x8000)
+        return address;
+
+    u32 physical_address = MAX_ROM_SIZE;
     switch (m_pCartridge->GetType())
     {
         case Cartridge::CartridgeMegaCart:
@@ -163,23 +186,13 @@ inline GC_Disassembler_Record* Memory::GetDisassemblerRecord(u16 address, u8 ban
         default:
         {
             if (bank != 0)
-                return NULL;
+                return MAX_ROM_SIZE;
 
             physical_address = (u32)(address - 0x8000);
             break;
         }
     }
-
-    if (physical_address >= MAX_ROM_SIZE)
-        return NULL;
-
-    return m_pDisassembledRomMap[physical_address];
-
-#else
-    UNUSED(address);
-    UNUSED(bank);
-    return NULL;
-#endif
+    return physical_address;
 }
 
 #endif	/* MEMORY_INLINE_H */

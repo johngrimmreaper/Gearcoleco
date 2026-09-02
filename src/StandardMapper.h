@@ -24,7 +24,7 @@
 #include "Cartridge.h"
 #include <cstring>
 
-class StandardMapper : public Mapper
+class StandardMapper final : public Mapper
 {
 public:
     StandardMapper(Cartridge* pCartridge);
@@ -37,6 +37,14 @@ public:
     virtual void LoadState(std::istream& stream);
     virtual u8* GetSaveData();
     virtual int GetSaveDataSize();
+    NO_INLINE u8 ReadDirect(u16 address)
+    {
+        return Read(address);
+    }
+    NO_INLINE void WriteDirect(u16 address, u8 value)
+    {
+        Write(address, value);
+    }
 
 private:
     u8 m_SRAM[0x800];
@@ -80,6 +88,7 @@ inline void StandardMapper::Write(u16 address, u8 value)
     if (m_pCartridge->HasSRAM() && (address >= 0xE000))
     {
         m_SRAM[address & 0x7FF] = value;
+        TraceMapperEvent(TRACE_MAPPER_SRAM, address, value, 0, address & 0x07FF);
     }
     else
     {

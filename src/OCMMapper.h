@@ -33,10 +33,12 @@ public:
 
     virtual void Reset();
     virtual u8 Read(u16 address);
+    virtual u8 Peek(u16 address);
     virtual void Write(u16 address, u8 value);
     virtual void SaveState(std::ostream& stream);
     virtual void LoadState(std::istream& stream);
     virtual u8 GetBankReg(int index) { return (index >= 0 && index < 4) ? m_BankReg[index] : 0; }
+    virtual u8 GetLastBank() { return m_LastBank; }
     virtual u8* GetSaveData();
     virtual int GetSaveDataSize();
 
@@ -60,9 +62,23 @@ private:
         return false;
     }
 
+    inline u8 NormalizeBank(u8 value) const
+    {
+        if (m_BankCount == 0)
+            return 0;
+        return (u8)(value % m_BankCount);
+    }
+
+    inline u8 ReadROM(u32 offset) const
+    {
+        if (IsValidPointer(m_pROM) && offset < m_ROMSize)
+            return m_pROM[offset];
+        return 0xFF;
+    }
+
     inline void ArmEepromReadWindow(u8 value)
     {
-        if ((value & 0x0F) == 0x0F)
+        if (NormalizeBank(value) == m_LastBank)
         {
             u64 now = m_pMemory->GetTotalCycles();
             m_EepromReadExpireCycles = now + (OCM_CYCLES_PER_FRAME * 3ULL);
@@ -73,7 +89,12 @@ private:
 
 private:
     Memory* m_pMemory;
+    u8* m_pROM;
+    u8* m_pEEPROM;
+    u32 m_ROMSize;
     u8 m_BankReg[4];
+    u32 m_BankCount;
+    u8 m_LastBank;
     u8 m_EepromCmdPos;
     u8 m_EepromState;
     u64 m_EepromReadExpireCycles;
@@ -92,10 +113,16 @@ inline OCMMapper::~OCMMapper()
 
 inline void OCMMapper::Reset()
 {
-    m_BankReg[0] = 3;
-    m_BankReg[1] = 2;
-    m_BankReg[2] = 1;
-    m_BankReg[3] = 0;
+    m_pROM = m_pCartridge->GetROM();
+    m_pEEPROM = m_pCartridge->GetEEPROM();
+    int romSize = m_pCartridge->GetROMSize();
+    m_ROMSize = romSize > 0 ? (u32)romSize : 0;
+    m_BankCount = m_ROMSize > 0 ? ((m_ROMSize - 1) / 0x2000) + 1 : 0;
+    m_LastBank = m_BankCount == 0 ? 0xFF : (m_BankCount > 0x100 ? 0xFF : (u8)(m_BankCount - 1));
+    m_BankReg[0] = NormalizeBank(3);
+    m_BankReg[1] = NormalizeBank(2);
+    m_BankReg[2] = NormalizeBank(1);
+    m_BankReg[3] = NormalizeBank(0);
     m_EepromCmdPos = 0;
     m_EepromState = EEP_NONE;
     m_EepromReadExpireCycles = 0;
@@ -103,25 +130,23 @@ inline void OCMMapper::Reset()
 
 inline u8 OCMMapper::Read(u16 address)
 {
-    u8* pRom = m_pCartridge->GetROM();
-
     if (address < 0xA000)
     {
         // 8000-9FFF: Bank 3
-        int bankOffset = (address - 0x8000) + (m_BankReg[3] * 0x2000);
-        return pRom[bankOffset];
+        u32 bankOffset = (u32)(address - 0x8000) + ((u32)m_BankReg[3] * 0x2000);
+        return ReadROM(bankOffset);
     }
     else if (address < 0xC000)
     {
         // A000-BFFF: Bank 0
-        int bankOffset = (address - 0xA000) + (m_BankReg[0] * 0x2000);
-        return pRom[bankOffset];
+        u32 bankOffset = (u32)(address - 0xA000) + ((u32)m_BankReg[0] * 0x2000);
+        return ReadROM(bankOffset);
     }
     else if (address < 0xE000)
     {
         // C000-DFFF: Bank 1
-        int bankOffset = (address - 0xC000) + (m_BankReg[1] * 0x2000);
-        return pRom[bankOffset];
+        u32 bankOffset = (u32)(address - 0xC000) + ((u32)m_BankReg[1] * 0x2000);
+        return ReadROM(bankOffset);
     }
     else
     {
@@ -129,24 +154,44 @@ inline u8 OCMMapper::Read(u16 address)
         // If STATUS mode, reading E000 returns 0xFF (status OK)
         if (((address & 0x0FFF) == 0x0000) && (m_EepromState == EEP_STATUS))
         {
+            TraceMapperEvent(TRACE_MAPPER_EEPROM, address, 0xFF, m_EepromState, 0);
             return 0xFF;
         }
 
-        // EEPROM read window: bank2==0x0F, active timer, E000-E0FF -> EEPROM
-        if (m_BankReg[2] == 0x0F && EepromReadWindowActive() && ((address & 0x0FFF) < 0x0100))
+        // EEPROM read window: last bank selected, active timer, E000-E0FF -> EEPROM
+        if (m_BankReg[2] == m_LastBank && ((address & 0x0FFF) < 0x0200) && EepromReadWindowActive())
         {
-            u8* pEEPROM = m_pCartridge->GetEEPROM();
-            if (IsValidPointer(pEEPROM))
+            if (IsValidPointer(m_pEEPROM))
             {
-                return pEEPROM[address & 0x03FF];
+                u8 value = m_pEEPROM[address & 0x03FF];
+                TraceMapperEvent(TRACE_MAPPER_EEPROM, address, value, m_EepromState, address & 0x03FF);
+                return value;
             }
             return 0xFF;
         }
 
         // Otherwise, ROM from bank 2
-        int bankOffset = (address - 0xE000) + (m_BankReg[2] * 0x2000);
-        return pRom[bankOffset];
+        u32 bankOffset = (u32)(address - 0xE000) + ((u32)m_BankReg[2] * 0x2000);
+        return ReadROM(bankOffset);
     }
+}
+
+inline u8 OCMMapper::Peek(u16 address)
+{
+    if (address < 0xA000)
+        return ReadROM((u32)(address - 0x8000) + ((u32)m_BankReg[3] * 0x2000));
+    if (address < 0xC000)
+        return ReadROM((u32)(address - 0xA000) + ((u32)m_BankReg[0] * 0x2000));
+    if (address < 0xE000)
+        return ReadROM((u32)(address - 0xC000) + ((u32)m_BankReg[1] * 0x2000));
+    if (((address & 0x0FFF) == 0x0000) && (m_EepromState == EEP_STATUS))
+        return 0xFF;
+    if (m_BankReg[2] == m_LastBank && ((address & 0x0FFF) < 0x0200) &&
+        EepromReadWindowActive() && IsValidPointer(m_pEEPROM))
+    {
+        return m_pEEPROM[address & 0x03FF];
+    }
+    return ReadROM((u32)(address - 0xE000) + ((u32)m_BankReg[2] * 0x2000));
 }
 
 inline void OCMMapper::Write(u16 address, u8 value)
@@ -164,11 +209,13 @@ inline void OCMMapper::Write(u16 address, u8 value)
         if (value == 0xAA && m_EepromCmdPos == 0)
         {
             m_EepromCmdPos = 1;
+            TraceMapperEvent(TRACE_MAPPER_EEPROM, address, value, m_EepromState, m_EepromCmdPos);
             return;
         }
         else if (value == 0x55 && m_EepromCmdPos == 1)
         {
             m_EepromCmdPos = 2;
+            TraceMapperEvent(TRACE_MAPPER_EEPROM, address, value, m_EepromState, m_EepromCmdPos);
             return;
         }
         else if (m_EepromCmdPos == 2)
@@ -195,17 +242,18 @@ inline void OCMMapper::Write(u16 address, u8 value)
             }
 
             m_EepromCmdPos = 0;
+            TraceMapperEvent(TRACE_MAPPER_EEPROM, address, value, m_EepromState, m_EepromCmdPos);
             return;
         }
         else if (m_EepromState == EEP_WRITE)
         {
             // Next write persists a single byte to 1KB EEPROM space
-            u8* pEEPROM = m_pCartridge->GetEEPROM();
-            if (IsValidPointer(pEEPROM))
+            if (IsValidPointer(m_pEEPROM))
             {
-                pEEPROM[address & 0x03FF] = value;
+                m_pEEPROM[address & 0x03FF] = value;
             }
             m_EepromState = EEP_NONE;
+            TraceMapperEvent(TRACE_MAPPER_EEPROM, address, value, m_EepromState, address & 0x03FF);
             return;
         }
 
@@ -217,13 +265,23 @@ inline void OCMMapper::Write(u16 address, u8 value)
     // FFFC -> bank 0, FFFD -> bank 1, FFFE -> bank 2 (also arms read-window), FFFF -> bank 3
     if (address >= 0xFFFC)
     {
+        int bank_index = address & 0x0003;
+        u8 old_bank = m_BankReg[bank_index];
         if (address == 0xFFFE)
         {
             // Arm or clear the 3-frame EEPROM read window
             ArmEepromReadWindow(value);
         }
 
-        m_BankReg[address & 0x0003] = (u8)(value & 0x0F);
+        m_BankReg[bank_index] = NormalizeBank(value);
+
+        if (address == 0xFFFE)
+        {
+            TraceMapperEvent(TRACE_MAPPER_EEPROM, address, value, m_BankReg[bank_index], m_EepromState);
+        }
+
+        if (old_bank != m_BankReg[bank_index])
+            TraceMapperEvent(TRACE_MAPPER_BANK, address, value, (u8)bank_index, old_bank);
 
         // Debug("--> OCM Bank[%d] = %d (addr=%04X, val=%02X)", (address & 3), m_BankReg[address & 3], address, value);
         return;
@@ -250,13 +308,14 @@ inline void OCMMapper::SaveState(std::ostream& stream)
     }
     stream.write(reinterpret_cast<const char*>(&framesLeft), sizeof(framesLeft));
 
-    u8* pEEPROM = m_pCartridge->GetEEPROM();
-    stream.write(reinterpret_cast<const char*>(pEEPROM), 0x400);
+    stream.write(reinterpret_cast<const char*>(m_pEEPROM), 0x400);
 }
 
 inline void OCMMapper::LoadState(std::istream& stream)
 {
     stream.read(reinterpret_cast<char*>(m_BankReg), sizeof(m_BankReg));
+    for (int i = 0; i < 4; i++)
+        m_BankReg[i] = NormalizeBank(m_BankReg[i]);
     stream.read(reinterpret_cast<char*>(&m_EepromCmdPos), sizeof(m_EepromCmdPos));
     stream.read(reinterpret_cast<char*>(&m_EepromState),   sizeof(m_EepromState));
 
@@ -272,13 +331,12 @@ inline void OCMMapper::LoadState(std::istream& stream)
         m_EepromReadExpireCycles = 0;
     }
 
-    u8* pEEPROM = m_pCartridge->GetEEPROM();
-    stream.read(reinterpret_cast<char*>(pEEPROM), 0x400);
+    stream.read(reinterpret_cast<char*>(m_pEEPROM), 0x400);
 }
 
 inline u8* OCMMapper::GetSaveData()
 {
-    return m_pCartridge->GetEEPROM();
+    return m_pEEPROM;
 }
 
 inline int OCMMapper::GetSaveDataSize()

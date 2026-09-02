@@ -30,6 +30,7 @@
 
 EXTERN void runahead_init(void);
 EXTERN void runahead_destroy(void);
+EXTERN void runahead_reset(void);
 EXTERN int runahead_get_frames(void);
 EXTERN void runahead_run(int frames, u8* frame_buffer, s16* sample_buffer, int* sample_count);
 

@@ -58,6 +58,8 @@ desktop.ini
 *.sav
 *.tmp
 *.state*
+docs/
+tests/
 
 #Xcode
 *.xcuserstate
@@ -65,9 +67,12 @@ xcuserdata/
 *.xcexplist
 *.xcsettings
 *.xccheckout
+platforms/ios/Support/ThumbnailKeys.local.xcconfig
 
 #binaries
-platforms/**/gearcoleco
+platforms/linux/**/gearcoleco
+platforms/macos/**/gearcoleco
+platforms/raspberry*/**/gearcoleco
 
 #Switch
 *.a

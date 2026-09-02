@@ -61,6 +61,7 @@ int application_headless_init(const ApplicationParams& params)
 
     config_debug.debug = true;
 
+    emu_set_video_chip(config_video.video_chip);
     emu_set_overscan(0);
     emu_audio_mute(true);
 
@@ -121,6 +122,7 @@ void application_headless_mainloop(void)
         Uint64 frame_start = SDL_GetPerformanceCounter();
 
         emu_update();
+        gui_debug_update();
         gui_finish_loading_rom();
 
         if (!emu_mcp_is_running())

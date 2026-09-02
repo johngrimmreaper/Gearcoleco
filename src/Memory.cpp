@@ -28,17 +28,21 @@
 #include "MegaCartMapper.h"
 #include "ActivisionMapper.h"
 #include "OCMMapper.h"
+#include "random.h"
 
 #include "Memory.h"
 #include "Processor.h"
 #include "Cartridge.h"
 #include "common.h"
 
-Memory::Memory(Cartridge* pCartridge)
+Memory::Memory(Cartridge* pCartridge, Random* pRandom)
 {
     m_pCartridge = pCartridge;
+    m_pRandom = pRandom;
     InitPointer(m_pProcessor);
     InitPointer(m_pMapper);
+    InitPointer(m_pStandardMapper);
+    InitPointer(m_pTraceLogger);
     InitPointer(m_pDisassembledRomMap);
     InitPointer(m_pDisassembledRamMap);
     InitPointer(m_pDisassembledBiosMap);
@@ -101,6 +105,17 @@ void Memory::SetProcessor(Processor* pProcessor)
     m_pProcessor = pProcessor;
 }
 
+void Memory::SetTraceLogger(TraceLogger* pTraceLogger)
+{
+#if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
+    m_pTraceLogger = pTraceLogger;
+    if (IsValidPointer(m_pMapper))
+        m_pMapper->SetTraceLogger(pTraceLogger);
+#else
+    UNUSED(pTraceLogger);
+#endif
+}
+
 void Memory::Init()
 {
     m_pRam = new u8[0x0400];
@@ -139,6 +154,7 @@ void Memory::Init()
 void Memory::SetupMapper()
 {
     SafeDelete(m_pMapper);
+    InitPointer(m_pStandardMapper);
 
     switch (m_pCartridge->GetType())
     {
@@ -152,10 +168,14 @@ void Memory::SetupMapper()
             m_pMapper = new OCMMapper(m_pCartridge, this);
             break;
         default:
-            m_pMapper = new StandardMapper(m_pCartridge);
+            m_pStandardMapper = new StandardMapper(m_pCartridge);
+            m_pMapper = m_pStandardMapper;
             break;
     }
 
+#if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
+    m_pMapper->SetTraceLogger(m_pTraceLogger);
+#endif
     m_pMapper->Reset();
 }
 
@@ -165,14 +185,22 @@ void Memory::Reset()
     m_bSGMUpper = (m_pCartridge->GetType() == Cartridge::CartridgeOCM);
     m_bSGMLower = false;
 
-    for (int i = 0; i < 0x400; i++)
+    for (int i = 0; i < 0x400; i += 4)
     {
-        m_pRam[i] = rand() % 256;
+        u32 rnd = m_pRandom->Next();
+        m_pRam[i] = (u8)rnd;
+        m_pRam[i + 1] = (u8)(rnd >> 8);
+        m_pRam[i + 2] = (u8)(rnd >> 16);
+        m_pRam[i + 3] = (u8)(rnd >> 24);
     }
 
-    for (int i = 0; i < 0x8000; i++)
+    for (int i = 0; i < 0x8000; i += 4)
     {
-        m_pSGMRam[i] = rand() % 256;
+        u32 rnd = m_pRandom->Next();
+        m_pSGMRam[i] = (u8)rnd;
+        m_pSGMRam[i + 1] = (u8)(rnd >> 8);
+        m_pSGMRam[i + 2] = (u8)(rnd >> 16);
+        m_pSGMRam[i + 3] = (u8)(rnd >> 24);
     }
 
     if (m_pCartridge->IsPAL())

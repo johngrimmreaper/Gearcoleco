@@ -163,10 +163,10 @@ int application_init(const ApplicationParams& params)
 void application_destroy(void)
 {
     save_window_size();
-    emu_destroy();
     ogl_renderer_destroy();
     ImGui_ImplSDL3_Shutdown();
     gui_destroy();
+    emu_destroy();
     gamepad_destroy();
     sdl_destroy();
     single_instance_destroy();
@@ -576,12 +576,13 @@ static void run_emulator(void)
     if (!display_should_run_emu_frame())
         return;
 
+    if (!events_input_updated())
+        events_emu();
+
     config_emulator.paused = emu_is_paused();
     emu_audio_sync = config_audio.sync;
     emu_update();
 
-    if (!events_input_updated())
-        events_emu();
     events_reset_input();
 }
 

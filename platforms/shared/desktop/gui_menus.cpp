@@ -53,6 +53,8 @@ static bool open_bios = false;
 static bool open_bios_warning = false;
 static bool save_debug_settings = false;
 static bool load_debug_settings = false;
+static const ImVec4 service_mcp_http_color(0.10f, 0.90f, 0.10f, 1.0f);
+static const ImVec4 service_mcp_stdio_color(0.90f, 0.70f, 0.10f, 1.0f);
 static ShaderPresetInfo shader_presets[SHADER_PRESET_MAX_DISCOVERED];
 static int shader_preset_count = 0;
 
@@ -162,6 +164,11 @@ static void menu_gearcoleco(void)
 
             ImGui::EndMenu();
         }
+
+        ImGui::Separator();
+        ImGui::MenuItem("Enable Softpatching", "", &config_emulator.softpatching);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Automatically applies a matching .ips patch next to the ROM when loading.");
 
         ImGui::Separator();
         
@@ -457,7 +464,7 @@ static void menu_emulator(void)
             ImGui::Separator();
             if (strlen(gui_bios_path) > 0)
             {
-                ImGui::TextColored(ImVec4(0.10f, 0.90f, 0.10f, 1.0f), "BIOS loaded");
+                ImGui::TextColored(service_mcp_http_color, "BIOS loaded");
             }
             else
             {
@@ -468,6 +475,14 @@ static void menu_emulator(void)
         }
 
         ImGui::Separator();
+
+        if (ImGui::BeginMenu("Mapper"))
+        {
+            ImGui::PushItemWidth(160.0f);
+            ImGui::Combo("##emu_mapper", &config_emulator.mapper, "Auto\0Standard\0MegaCart\0Activision\0OCM\0\0");
+            ImGui::PopItemWidth();
+            ImGui::EndMenu();
+        }
 
         if (ImGui::BeginMenu("Refresh Rate"))
         {
@@ -607,12 +622,21 @@ static void menu_video(void)
 
         ImGui::Separator();
 
+        if (ImGui::BeginMenu("Video Chip"))
+        {
+            ImGui::PushItemWidth(150.0f);
+            ImGui::Combo("##video_chip", &config_video.video_chip,
+                "Auto\0TMS9918A\0F18A\0\0");
+            ImGui::PopItemWidth();
+            ImGui::EndMenu();
+        }
+
         if (ImGui::BeginMenu("Scale"))
         {
             ImGui::PushItemWidth(250.0f);
             ImGui::Combo("##scale", &config_video.scale, "Integer Scale (Auto)\0Integer Scale (Manual)\0Scale to Window Height\0Scale to Window Width & Height\0\0");
             if (config_video.scale == 1)
-                ImGui::SliderInt("##scale_manual", &config_video.scale_manual, 1, 10);
+                ImGui::SliderInt("##scale_manual", &config_video.scale_manual, 1, 20);
             ImGui::PopItemWidth();
             ImGui::EndMenu();
         }
@@ -640,11 +664,12 @@ static void menu_video(void)
 
         if (ImGui::BeginMenu("Vertical Sync"))
         {
-            ImGui::PushItemWidth(240.0f);
 #if defined(_WIN32)
-            if (ImGui::Combo("##sync_mode", &config_video.sync_mode, "Disabled\0Fixed (60 Hz, 120 Hz, 240 Hz)\0Variable Refresh Rate (VRR)\0\0"))
+            ImGui::PushItemWidth(220.0f);
+            if (ImGui::Combo("##sync_mode", &config_video.sync_mode, "Disabled\0Fixed Vertical Sync\0Variable Refresh Rate (VRR)\0\0"))
 #else
-            if (ImGui::Combo("##sync_mode", &config_video.sync_mode, "Disabled\0Fixed (60 Hz, 120 Hz, 240 Hz)\0\0"))
+            ImGui::PushItemWidth(100.0f);
+            if (ImGui::Combo("##sync_mode", &config_video.sync_mode, "Disabled\0Enabled\0\0"))
 #endif
             {
                 if (config_video.sync_mode != config_VideoSync_Disabled)
@@ -658,19 +683,18 @@ static void menu_video(void)
             }
             ImGui::PopItemWidth();
 
+#if defined(_WIN32)
             if (ImGui::IsItemHovered())
             {
                 ImGui::BeginTooltip();
                 ImGui::Text("Disabled: do not synchronize presentation to the monitor.");
-                ImGui::Text("Fixed: use normal VSync for 60 Hz, 120 Hz, and 240 Hz displays.");
-#if defined(_WIN32)
+                ImGui::Text("Fixed Vertical Sync: use normal VSync.");
                 ImGui::Text("VRR: present at the emulator frame rate.");
-                ImGui::Text("VRR requires fullscreen, a VRR display, and G-SYNC,");
+                ImGui::Text("\nVRR requires fullscreen, a VRR display, and G-SYNC,");
                 ImGui::Text("FreeSync, or Adaptive Sync enabled in your monitor and GPU driver settings.");
-#endif
                 ImGui::EndTooltip();
             }
-
+#endif
             ImGui::EndMenu();
         }
 
@@ -1169,7 +1193,7 @@ static void menu_input(void)
             ImGui::Combo("##spinner", &config_emulator.spinner, "Disabled\0Super Action Controller\0Steering Wheel\0Roller Controller\0\0", 4);
             if (ImGui::IsItemHovered())
             {
-                ImGui::SetTooltip("SAC Spinner for P1 is controlled with mouse movement.\nSAC Spinner for P2 is controlled with mouse wheel.\nSteering Wheel is controlled with mouse movement.\nRoller Controller is controlled with mouse movement and mouse buttons.");
+                ImGui::SetTooltip("MAKE SURE THIS IS DISABLED FOR NORMAL GAMES\n\n - SAC Spinner for P1 is controlled with mouse movement.\n - SAC Spinner for P2 is controlled with mouse wheel.\n - Steering Wheel is controlled with mouse movement.\n - Roller Controller is controlled with mouse movement and mouse buttons.");
             }
             ImGui::SliderInt("##spinner_sensitivity", &config_emulator.spinner_sensitivity, 1, 10, "Sensitivity = %d");
 
@@ -1347,9 +1371,10 @@ static void menu_debug(void)
             ImGui::Separator();
 
             if (stdio_running)
-                ImGui::TextColored(ImVec4(0.90f, 0.70f, 0.10f, 1.0f), "STDIO mode active");
+                ImGui::TextColored(service_mcp_stdio_color, "STDIO mode active");
             else if (http_running)
-                ImGui::TextColored(ImVec4(0.10f, 0.90f, 0.10f, 1.0f), "Listening on %s:%d", config_emulator.mcp_http_address.c_str(), config_emulator.mcp_tcp_port);
+                ImGui::TextColored(service_mcp_http_color, "Listening on %s:%d",
+                    emu_mcp_get_http_address(), emu_mcp_get_http_port());
             else
                 ImGui::TextColored(ImVec4(0.98f, 0.15f, 0.45f, 1.0f), "Stopped");
 
@@ -1403,12 +1428,40 @@ static void menu_debug(void)
 
         if (ImGui::BeginMenu("Video", config_debug.debug))
         {
-            ImGui::MenuItem("Show Name Table", "", &config_debug.show_video_nametable);
-            ImGui::MenuItem("Show Pattern Table", "", &config_debug.show_video_tiles);
-            ImGui::MenuItem("Show Sprites", "", &config_debug.show_video_sprites);
-            //if (!emu_get_core()->GetVideo()->IsSG1000Mode())
-                ImGui::MenuItem("Show Palettes", "", &config_debug.show_video_palettes);
-            ImGui::MenuItem("Show VDP Registers", "", &config_debug.show_video_regs);
+            bool f18a_active = emu_get_core()->GetVideoChip() == GC_VIDEO_CHIP_F18A;
+
+            if (ImGui::BeginMenu("TMS9918A"))
+            {
+                ImGui::MenuItem("Name Table", "", &config_debug.show_tms9918a_nametable,
+                    !f18a_active);
+                ImGui::MenuItem("Pattern Table", "", &config_debug.show_tms9918a_patterns,
+                    !f18a_active);
+                ImGui::MenuItem("Sprites", "", &config_debug.show_tms9918a_sprites,
+                    !f18a_active);
+                ImGui::MenuItem("Palettes", "", &config_debug.show_tms9918a_palettes,
+                    !f18a_active);
+                ImGui::MenuItem("Registers", "", &config_debug.show_tms9918a_regs,
+                    !f18a_active);
+                ImGui::EndMenu();
+            }
+
+            if (ImGui::BeginMenu("F18A"))
+            {
+                ImGui::MenuItem("Name Tables", "", &config_debug.show_f18a_nametables,
+                    f18a_active);
+                ImGui::MenuItem("Pattern Table", "", &config_debug.show_f18a_patterns,
+                    f18a_active);
+                ImGui::MenuItem("Sprites", "", &config_debug.show_f18a_sprites,
+                    f18a_active);
+                ImGui::MenuItem("Palette RAM", "", &config_debug.show_f18a_palette,
+                    f18a_active);
+                ImGui::MenuItem("Registers", "", &config_debug.show_f18a_regs,
+                    f18a_active);
+                ImGui::MenuItem("Extended Registers", "",
+                    &config_debug.show_f18a_extended_regs, f18a_active);
+                ImGui::EndMenu();
+            }
+
             ImGui::EndMenu();
         }
 
@@ -1474,13 +1527,13 @@ static void draw_mcp_status(void)
         return;
 
     char status[128];
-    ImVec4 color(0.10f, 0.90f, 0.10f, 1.0f);
+    ImVec4 color = service_mcp_http_color;
 
     int transport_mode = emu_mcp_get_transport_mode();
     if (transport_mode == 0)
     {
         snprintf(status, sizeof(status), "MCP: STDIO");
-        color = ImVec4(0.90f, 0.70f, 0.10f, 1.0f);
+        color = service_mcp_stdio_color;
     }
     else if (transport_mode == 1)
     {

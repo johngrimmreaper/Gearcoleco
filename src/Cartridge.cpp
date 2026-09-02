@@ -21,9 +21,12 @@
 #include <algorithm>
 #include <ctype.h>
 #include "Cartridge.h"
+#define MINIZ_NO_ZLIB_COMPATIBLE_NAMES
 #include "miniz.h"
+#undef MINIZ_NO_ZLIB_COMPATIBLE_NAMES
 #include "game_db.h"
 #include "common.h"
+#include "ips_patch.h"
 
 Cartridge::Cartridge()
 {
@@ -34,13 +37,17 @@ Cartridge::Cartridge()
     m_bValidROM = false;
     m_bReady = false;
     m_bInGameDatabase = false;
+    m_pGameDatabaseName = NULL;
     m_szFilePath[0] = 0;
     m_szFileName[0] = 0;
     m_szFileDirectory[0] = 0;
     m_iROMBankCount = 0;
     m_bPAL = false;
+    m_bF18ARequired = false;
     m_bSRAM = false;
     m_iCRC = 0;
+    m_softpatch_applied = false;
+    m_softpatch_path[0] = 0;
 }
 
 Cartridge::~Cartridge()
@@ -63,13 +70,17 @@ void Cartridge::Reset()
     m_bValidROM = false;
     m_bReady = false;
     m_bInGameDatabase = false;
+    m_pGameDatabaseName = NULL;
     m_szFilePath[0] = 0;
     m_szFileName[0] = 0;
     m_szFileDirectory[0] = 0;
     m_iROMBankCount = 0;
     m_bPAL = false;
+    m_bF18ARequired = false;
     m_bSRAM = false;
     m_iCRC = 0;
+    m_softpatch_applied = false;
+    m_softpatch_path[0] = 0;
     for (int j = 0; j < 0x400; j++)
         m_pEEPROM[j] = 0xFF;
 }
@@ -84,9 +95,9 @@ bool Cartridge::IsPAL() const
     return m_bPAL;
 }
 
-bool Cartridge::HasSRAM() const
+bool Cartridge::IsF18ARequired() const
 {
-    return m_bSRAM;
+    return m_bF18ARequired;
 }
 
 bool Cartridge::IsValidROM() const
@@ -102,6 +113,11 @@ bool Cartridge::IsReady() const
 bool Cartridge::IsInGameDatabase() const
 {
     return m_bInGameDatabase;
+}
+
+const char* Cartridge::GetGameDatabaseName() const
+{
+    return m_pGameDatabaseName;
 }
 
 Cartridge::CartridgeTypes Cartridge::GetType() const
@@ -148,16 +164,6 @@ void Cartridge::ForceConfig(Cartridge::ForceConfiguration config)
     }
 }
 
-int Cartridge::GetROMSize() const
-{
-    return m_iROMSize;
-}
-
-int Cartridge::GetROMBankCount() const
-{
-    return m_iROMBankCount;
-}
-
 const char* Cartridge::GetFilePath() const
 {
     return m_szFilePath;
@@ -173,9 +179,14 @@ const char* Cartridge::GetFileDirectory() const
     return m_szFileDirectory;
 }
 
-u8* Cartridge::GetROM() const
+bool Cartridge::IsSoftpatchApplied() const
 {
-    return m_pROM;
+    return m_softpatch_applied;
+}
+
+const char* Cartridge::GetSoftpatchPath() const
+{
+    return m_softpatch_path;
 }
 
 u8* Cartridge::GetEEPROM() const
@@ -183,7 +194,7 @@ u8* Cartridge::GetEEPROM() const
     return m_pEEPROM;
 }
 
-bool Cartridge::LoadFromZipFile(const u8* buffer, int size)
+bool Cartridge::LoadFromZipFile(const u8* buffer, int size, bool softpatching)
 {
     using namespace std;
 
@@ -227,7 +238,7 @@ bool Cartridge::LoadFromZipFile(const u8* buffer, int size)
                 return false;
             }
 
-            bool ok = LoadFromBuffer((const u8*) p, (int)uncomp_size);
+            bool ok = LoadFromBufferWithSoftpatch((const u8*) p, (int)uncomp_size, softpatching);
 
             free(p);
             mz_zip_reader_end(&zip_archive);
@@ -240,7 +251,7 @@ bool Cartridge::LoadFromZipFile(const u8* buffer, int size)
     return false;
 }
 
-bool Cartridge::LoadFromFile(const char* path)
+bool Cartridge::LoadFromFile(const char* path, bool softpatching)
 {
     using namespace std;
 
@@ -301,11 +312,11 @@ bool Cartridge::LoadFromFile(const char* path)
                 if (extension == "zip")
                 {
                     Debug("Loading from ZIP...");
-                    m_bReady = LoadFromZipFile(reinterpret_cast<u8*> (memblock), size);
+                    m_bReady = LoadFromZipFile(reinterpret_cast<u8*> (memblock), size, softpatching);
                 }
                 else
                 {
-                    m_bReady = LoadFromBuffer(reinterpret_cast<u8*> (memblock), size);
+                    m_bReady = LoadFromBufferWithSoftpatch(reinterpret_cast<u8*> (memblock), size, softpatching);
                 }
 
                 if (m_bReady)
@@ -339,12 +350,41 @@ bool Cartridge::LoadFromFile(const char* path)
         m_bReady = false;
     }
 
-    if (!m_bReady)
+    if (!m_bReady && m_softpatch_applied)
+    {
+        Error("Media rejected after applying IPS patch %s. Loading unpatched media.", m_softpatch_path);
+        return LoadFromFile(path, false);
+    }
+    else if (!m_bReady)
     {
         Reset();
     }
 
     return m_bReady;
+}
+
+bool Cartridge::LoadFromBufferWithSoftpatch(const u8* buffer, int size, bool softpatching)
+{
+    u8* patched_buffer = NULL;
+    int patched_size = 0;
+    char patch_path[4096] = {};
+    bool patched = softpatching && ips_apply_patch(m_szFilePath, buffer, size,
+        &patched_buffer, &patched_size, patch_path, sizeof(patch_path));
+
+    bool loaded;
+    if (patched)
+        loaded = LoadFromBuffer(patched_buffer, patched_size);
+    else
+        loaded = LoadFromBuffer(buffer, size);
+
+    m_softpatch_applied = patched;
+    if (m_softpatch_applied)
+        strncpy_fit(m_softpatch_path, patch_path, sizeof(m_softpatch_path));
+    else
+        m_softpatch_path[0] = 0;
+
+    SafeDeleteArray(patched_buffer);
+    return loaded;
 }
 
 bool Cartridge::LoadFromBuffer(const u8* buffer, int size)
@@ -388,6 +428,9 @@ bool Cartridge::GatherMetadata(u32 crc)
 {
     m_bPAL = false;
     m_bSRAM = false;
+    m_bF18ARequired = false;
+
+    Log("ROM CRC32: %X", crc);
 
     Log("ROM Size: %d KB", m_iROMSize / 1024);
 
@@ -465,6 +508,7 @@ void Cartridge::GetInfoFromDB(u32 crc)
 {
     int i = 0;
     m_bInGameDatabase = false;
+    m_pGameDatabaseName = NULL;
 
     while(!m_bInGameDatabase && (kGameDatabase[i].title != 0))
     {
@@ -473,6 +517,7 @@ void Cartridge::GetInfoFromDB(u32 crc)
         if (db_crc == crc)
         {
             m_bInGameDatabase = true;
+            m_pGameDatabaseName = kGameDatabase[i].title;
 
             Log("ROM found in database: %s. CRC: %X", kGameDatabase[i].title, crc);
 
@@ -488,6 +533,12 @@ void Cartridge::GetInfoFromDB(u32 crc)
                 m_Type = CartridgeOCM;
                 for (int j = 0; j < 0x400; j++)
                     m_pEEPROM[j] = 0xFF;
+            }
+
+            if (kGameDatabase[i].mode & GC_GameDBMode_F18A)
+            {
+                Log("Cartridge requires F18A");
+                m_bF18ARequired = true;
             }
         }
         else

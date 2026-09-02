@@ -80,6 +80,14 @@
 #define CLAMP(value, min, max) MIN(MAX(value, min), max)
 #define UNUSED(expr) (void)(expr)
 
+#if defined(__GNUC__) || defined(__clang__)
+    #define likely(x)   __builtin_expect(!!(x), 1)
+    #define unlikely(x) __builtin_expect(!!(x), 0)
+#else
+    #define likely(x)   (x)
+    #define unlikely(x) (x)
+#endif
+
 typedef uint8_t u8;
 typedef int8_t s8;
 typedef uint16_t u16;
@@ -103,6 +111,7 @@ typedef void (*RamChangedCallback) (void);
 
 #define GC_RESOLUTION_WIDTH 256
 #define GC_RESOLUTION_HEIGHT 192
+#define GC_VIDEO_MAX_WIDTH 512
 
 #define GC_MAX_GAMEPADS 2
 #define GC_MAX_SPRITES 32
@@ -115,6 +124,7 @@ typedef void (*RamChangedCallback) (void);
 #define GC_RESOLUTION_SMS_OVERSCAN_H_284_R 14
 #define GC_RESOLUTION_OVERSCAN_V 24
 #define GC_RESOLUTION_OVERSCAN_V_PAL 48
+#define GC_VIDEO_MAX_HEIGHT GC_RESOLUTION_HEIGHT_WITH_OVERSCAN
 
 #define GC_CYCLES_PER_LINE 228
 
@@ -132,9 +142,10 @@ typedef void (*RamChangedCallback) (void);
 #define GC_AUDIO_QUEUE_SIZE 1792
 
 #define GC_SAVESTATE_MAGIC 0x09200902
-#define GC_SAVESTATE_VERSION 105
+#define GC_SAVESTATE_VERSION 106
 #define GC_SAVESTATE_MIN_VERSION 100
 #define GC_SAVESTATE_VERSION_V1 1
+#define GC_LIBRETRO_SAVESTATE_SIZE 0x3A000
 
 struct GC_SaveState_Header
 {
@@ -181,6 +192,13 @@ enum GC_Color_Format
     GC_PIXEL_BGRA8888
 };
 
+enum GC_VideoChip
+{
+    GC_VIDEO_CHIP_AUTO = 0,
+    GC_VIDEO_CHIP_TMS9918A,
+    GC_VIDEO_CHIP_F18A
+};
+
 enum GC_Keys
 {
     Keypad_8 = 0x01,
@@ -222,6 +240,7 @@ struct GC_RuntimeInfo
     int screen_width;
     int screen_height;
     GC_Region region;
+    double fps;
 };
 
 enum GC_Disassembler_Syntax
@@ -288,5 +307,16 @@ inline int AsHex(const char c)
 {
    return c >= 'A' ? c - 'A' + 0xA : c - '0';
 }
+
+#if defined(__GNUC__) || defined(__clang__)
+    #define INLINE inline __attribute__((always_inline))
+    #define NO_INLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+    #define INLINE __forceinline
+    #define NO_INLINE __declspec(noinline)
+#else
+    #define INLINE inline
+    #define NO_INLINE
+#endif
 
 #endif	/* DEFINITIONS_H */

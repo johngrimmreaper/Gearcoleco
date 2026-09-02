@@ -352,8 +352,8 @@ void McpServer::HandleInitialize(const json& request)
         }},
         {"serverInfo", {
             {"name", "gearcoleco-mcp-server"},
-            {"title", "Gearcoleco MCP Server"},
-            {"description", "Debug/control Gearcoleco ColecoVision: execution, breakpoints, memory, Z80 CPU, TMS9918 VDP, SN76489 PSG, AY-3-8910 SGM, disassembly, symbols, sprites, save states, rewind, keypad/input, screenshots."},
+            {"title", GEARCOLECO_TITLE " MCP Server"},
+            {"description", "Debug/control " GEARCOLECO_TITLE " ColecoVision: execution, breakpoints, memory, Z80 CPU, TMS9918 VDP, SN76489 PSG, AY-3-8910 SGM, disassembly, symbols, sprites, save states, rewind, keypad/input, screenshots."},
             {"version", GEARCOLECO_VERSION}
         }}
     };
@@ -445,7 +445,7 @@ json McpServer::BuildToolList()
     tools.push_back({
         {"name", "debug_step_frame"},
         {"title", "Debug Step Frame"},
-        {"description", "Run one or more video frames to VBlank."},
+        {"description", "Run one or more video frames to VBlank. Default mode is async; use mode sync to wait until all requested frames complete."},
         {"annotations", {{"readOnlyHint", false}, {"destructiveHint", true}, {"idempotentHint", false}, {"openWorldHint", false}}},
         {"inputSchema", {
             {"type", "object"},
@@ -455,6 +455,11 @@ json McpServer::BuildToolList()
                     {"description", "Number of frames to step. Default 1."},
                     {"minimum", 1},
                     {"maximum", 1000}
+                }},
+                {"mode", {
+                    {"type", "string"},
+                    {"description", "async returns after scheduling; sync waits until all requested frames complete. Default async."},
+                    {"enum", json::array({"async", "sync"})}
                 }}
             }},
             {"additionalProperties", false}
@@ -773,7 +778,7 @@ json McpServer::BuildToolList()
     tools.push_back({
         {"name", "get_vdp_registers"},
         {"title", "Get VDP Registers"},
-        {"description", "Read TMS9918 VDP registers R0-R7 with hex values and decoded meanings."},
+        {"description", "Read TMS9918A or F18A V1 registers with hex values and decoded meanings."},
         {"annotations", {{"readOnlyHint", true}, {"destructiveHint", false}, {"idempotentHint", true}, {"openWorldHint", false}}},
         {"inputSchema", {
             {"type", "object"},
@@ -785,7 +790,7 @@ json McpServer::BuildToolList()
     tools.push_back({
         {"name", "get_vdp_status"},
         {"title", "Get VDP Status"},
-        {"description", "Read TMS9918 VDP video state: flags, mode, render line, display state."},
+        {"description", "Read TMS9918A or F18A V1 video state, status flags, raster state, and GPU state."},
         {"annotations", {{"readOnlyHint", true}, {"destructiveHint", false}, {"idempotentHint", true}, {"openWorldHint", false}}},
         {"inputSchema", {
             {"type", "object"},
@@ -1577,9 +1582,9 @@ json McpServer::BuildToolList()
     });
 
     tools.push_back({
-        {"name", "memory_find_bytes"},
-        {"title", "Find Byte Sequence in Memory"},
-        {"description", "Find consecutive hex byte sequence in memory; return addresses."},
+        {"name", "memory_find"},
+        {"title", "Find Bytes or Text in Memory"},
+        {"description", "Find consecutive hex bytes or text in memory; return addresses."},
         {"annotations", {{"readOnlyHint", true}, {"destructiveHint", false}, {"idempotentHint", true}, {"openWorldHint", false}}},
         {"inputSchema", {
             {"type", "object"},
@@ -1590,10 +1595,27 @@ json McpServer::BuildToolList()
                 }},
                 {"hex_bytes", {
                     {"type", "string"},
-                    {"description", "Hex byte pairs to find, e.g. '04E5FF32' (spaces optional)"}
+                    {"description", "Hex byte pairs to find, e.g. '04E5FF32' (spaces optional). "
+                        "Use either hex_bytes or text."},
+                    {"minLength", 1}
+                }},
+                {"text", {
+                    {"type", "string"},
+                    {"description", "UTF-8 text to find. Use either text or hex_bytes."},
+                    {"minLength", 1}
+                }},
+                {"case_sensitive", {
+                    {"type", "boolean"},
+                    {"description", "Match text case. Default true; false folds ASCII letters. "
+                        "Ignored for hex_bytes."}
                 }}
             }},
-            {"required", json::array({"area", "hex_bytes"})}
+            {"required", json::array({"area"})},
+            {"oneOf", json::array({
+                {{"required", json::array({"hex_bytes"})}},
+                {{"required", json::array({"text"})}}
+            })},
+            {"additionalProperties", false}
         }}
     });
 
@@ -1601,30 +1623,30 @@ json McpServer::BuildToolList()
     tools.push_back({
         {"name", "get_trace_log"},
         {"title", "Get Trace Log"},
-        {"description", "Read trace log entries: CPU, IRQ, VDP, PSG, AY-3-8910, I/O port, SGM events."},
+        {"description", "Read formatted trace lines using absolute sequence pagination."},
         {"annotations", {{"readOnlyHint", true}, {"destructiveHint", false}, {"idempotentHint", true}, {"openWorldHint", false}}},
         {"inputSchema", {
             {"type", "object"},
             {"properties", {
                 {"start", {
                     {"type", "integer"},
-                    {"description", "Start index; 0 oldest, default 0."},
-                    {"minimum", 0}
+                    {"description", "Absolute trace sequence, or a negative value to read that many entries from the retained tail (omit for latest 100)"}
                 }},
                 {"count", {
                     {"type", "integer"},
-                    {"description", "Entry count; default 100, max 1000."},
+                    {"description", "Entries to return (default 100, max 1000)"},
                     {"minimum", 1},
                     {"maximum", 1000}
                 }}
-            }}
+            }},
+            {"additionalProperties", false}
         }}
     });
 
     tools.push_back({
         {"name", "set_trace_log"},
         {"title", "Set Trace Log"},
-        {"description", "Enable/disable trace log with flags bitmask: 0 cpu, 1 irq, 2 vdp_write, 3 vdp_status, 4 psg, 5 ay8910, 6 io_port, 7 sgm; 0xFF all."},
+        {"description", "Configure memory or disk trace capture with exact event filters."},
         {"annotations", {{"readOnlyHint", false}, {"destructiveHint", true}, {"idempotentHint", true}, {"openWorldHint", false}}},
         {"inputSchema", {
             {"type", "object"},
@@ -1633,11 +1655,37 @@ json McpServer::BuildToolList()
                     {"type", "boolean"},
                     {"description", "true starts tracing, false stops."}
                 }},
-                {"flags", {
-                    {"type", "integer"},
-                    {"description", "Trace type bitmask; default 0xFF all."},
-                    {"minimum", 0},
-                    {"maximum", 255}
+                {"output", {
+                    {"type", "string"},
+                    {"enum", json::array({"memory", "disk"})}
+                }},
+                {"memory_size", {
+                    {"type", "string"},
+                    {"enum", json::array({"100K", "500K", "1M", "2M", "5M"})}
+                }},
+                {"disk_size", {
+                    {"type", "string"},
+                    {"enum", json::array({"10MB", "50MB", "100MB", "250MB", "500MB", "1GB", "unbounded"})}
+                }},
+                {"output_path", {
+                    {"type", "string"},
+                    {"description", "Output directory for disk capture."}
+                }},
+                {"filters", {
+                    {"type", "array"},
+                    {"minItems", 1},
+                    {"uniqueItems", true},
+                    {"items", {
+                        {"type", "string"},
+                        {"enum", json::array({
+                            "cpu.instructions", "cpu.interrupts",
+                            "vdp.registers", "vdp.interrupts", "vdp.status", "vdp.sprites", "vdp.timing", "vdp.vram",
+                            "psg.tone", "psg.volume", "psg.noise",
+                            "ay8910.registers", "ay8910.tone", "ay8910.noise_mixer", "ay8910.volume", "ay8910.envelope", "ay8910.io",
+                            "io.reads", "io.writes", "input.reads", "input.writes", "sgm.control",
+                            "mapper.banks", "mapper.eeprom", "mapper.sram"
+                        })}
+                    }}
                 }}
             }},
             {"required", json::array({"enabled"})}
@@ -2024,7 +2072,7 @@ json McpServer::ExecuteCommand(const std::string& toolName, const json& argument
             return {{"error", "Invalid frames value (must be 1-1000)"}};
 
         m_debugAdapter.StepFrame(frames);
-        return {{"success", true}, {"frames", frames}};
+        return {{"success", true}, {"mode", "async"}, {"pending", true}, {"frames", frames}};
     }
     else if (normalizedTool == "debug_reset")
     {
@@ -2658,28 +2706,40 @@ json McpServer::ExecuteCommand(const std::string& toolName, const json& argument
         std::string data_type = arguments.value("data_type", "unsigned");
         return m_debugAdapter.MemorySearch(area, op, compare_type, compare_value, data_type);
     }
-    else if (normalizedTool == "memory_find_bytes")
+    else if (normalizedTool == "memory_find")
     {
         if (!arguments.contains("area") || !arguments["area"].is_number_integer())
             return {{"error", "area is required"}};
-        if (!arguments.contains("hex_bytes") || !arguments["hex_bytes"].is_string())
-            return {{"error", "hex_bytes is required"}};
+        if (arguments.contains("hex_bytes") && !arguments["hex_bytes"].is_string())
+            return {{"error", "hex_bytes must be a string"}};
+        if (arguments.contains("text") && !arguments["text"].is_string())
+            return {{"error", "text must be a string"}};
+        if (arguments.contains("case_sensitive") && !arguments["case_sensitive"].is_boolean())
+            return {{"error", "case_sensitive must be a boolean"}};
+
+        bool has_hex_bytes = arguments.contains("hex_bytes");
+        bool has_text = arguments.contains("text");
+        if (has_hex_bytes == has_text)
+            return {{"error", "Exactly one of hex_bytes or text is required"}};
 
         int area = arguments["area"].get<int>();
-        std::string hex_bytes = arguments["hex_bytes"].get<std::string>();
-        return m_debugAdapter.MemoryFindBytes(area, hex_bytes);
+        std::string value;
+        if (has_text)
+            value = arguments["text"].get<std::string>();
+        else
+            value = arguments["hex_bytes"].get<std::string>();
+        bool case_sensitive = arguments.value("case_sensitive", true);
+        return m_debugAdapter.MemoryFind(area, value, has_text, case_sensitive);
     }
     else if (normalizedTool == "get_trace_log")
     {
-        int start = arguments.value("start", 0);
+        s64 start = arguments.value("start", (s64)-100);
         int count = arguments.value("count", 100);
         return m_debugAdapter.GetTraceLog(start, count);
     }
     else if (normalizedTool == "set_trace_log")
     {
-        bool enabled = arguments["enabled"];
-        u32 flags = arguments.value("flags", 0xFF);
-        return m_debugAdapter.SetTraceLog(enabled, flags);
+        return m_debugAdapter.SetTraceLog(arguments);
     }
     else
     {
@@ -2932,4 +2992,3 @@ void McpServer::HandleResourcesRead(const json& request)
 
     SendResponse(response);
 }
-

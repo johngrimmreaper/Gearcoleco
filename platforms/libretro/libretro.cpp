@@ -57,6 +57,7 @@ static bool libretro_supports_bitmasks = false;
 static int spinner_support = 0;
 static int spinner_sensitivity = 1;
 static float aspect_ratio = 0.0f;
+static GC_VideoChip video_chip = GC_VIDEO_CHIP_AUTO;
 static bool categories_supported = false;
 
 static GearcolecoCore* core;
@@ -156,7 +157,7 @@ void retro_init(void)
     core->Init(GC_PIXEL_RGB565);
 #endif
 
-    frame_buffer = new u8[GC_RESOLUTION_WIDTH_WITH_OVERSCAN * GC_RESOLUTION_HEIGHT_WITH_OVERSCAN * 2];
+    frame_buffer = new u8[GC_VIDEO_MAX_WIDTH * GC_VIDEO_MAX_HEIGHT * 2];
 
     audio_sample_count = 0;
 
@@ -182,6 +183,7 @@ void retro_deinit(void)
     current_screen_height = 0;
     current_aspect_ratio = 0.0f;
     aspect_ratio = 0.0f;
+    video_chip = GC_VIDEO_CHIP_AUTO;
     libretro_supports_bitmasks = false;
 
     reset_controller_devices();
@@ -312,7 +314,7 @@ static void apply_controller_device(unsigned port, unsigned device, bool log_dev
 void retro_get_system_info(struct retro_system_info *info)
 {
     memset(info, 0, sizeof(*info));
-    info->library_name     = "Gearcoleco";
+    info->library_name     = GEARCOLECO_TITLE;
     info->library_version  = GEARCOLECO_VERSION;
     info->need_fullpath    = false;
     info->valid_extensions = "col|cv|bin|rom";
@@ -334,10 +336,10 @@ void retro_get_system_av_info(struct retro_system_av_info *info)
 
     info->geometry.base_width   = runtime_info.screen_width;
     info->geometry.base_height  = runtime_info.screen_height;
-    info->geometry.max_width    = GC_RESOLUTION_WIDTH_WITH_OVERSCAN;
-    info->geometry.max_height   = GC_RESOLUTION_HEIGHT_WITH_OVERSCAN;
+    info->geometry.max_width    = GC_VIDEO_MAX_WIDTH;
+    info->geometry.max_height   = GC_VIDEO_MAX_HEIGHT;
     info->geometry.aspect_ratio = aspect_ratio;
-    info->timing.fps            = runtime_info.region == Region_NTSC ? 60.0 : 50.0;
+    info->timing.fps            = runtime_info.fps;
     info->timing.sample_rate    = 44100.0;
 }
 
@@ -705,6 +707,38 @@ static void check_variables(void)
             config.region = Cartridge::CartridgeUnknownRegion;
     }
 
+    var.key = "gearcoleco_mapper";
+    var.value = NULL;
+
+    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+    {
+        if (strcmp(var.value, "Auto") == 0)
+            config.type = Cartridge::CartridgeNotSupported;
+        else if (strcmp(var.value, "Standard") == 0)
+            config.type = Cartridge::CartridgeColecoVision;
+        else if (strcmp(var.value, "MegaCart") == 0)
+            config.type = Cartridge::CartridgeMegaCart;
+        else if (strcmp(var.value, "Activision") == 0)
+            config.type = Cartridge::CartridgeActivisionCart;
+        else if (strcmp(var.value, "OCM") == 0)
+            config.type = Cartridge::CartridgeOCM;
+        else
+            config.type = Cartridge::CartridgeNotSupported;
+    }
+
+    var.key = "gearcoleco_video_chip";
+    var.value = NULL;
+
+    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+    {
+        if (strcmp(var.value, "TMS9918A") == 0)
+            video_chip = GC_VIDEO_CHIP_TMS9918A;
+        else if (strcmp(var.value, "F18A") == 0)
+            video_chip = GC_VIDEO_CHIP_F18A;
+        else
+            video_chip = GC_VIDEO_CHIP_AUTO;
+    }
+
     var.key = "gearcoleco_aspect_ratio";
     var.value = NULL;
 
@@ -802,9 +836,9 @@ void retro_run(void)
         retro_system_av_info info;
         info.geometry.base_width   = runtime_info.screen_width;
         info.geometry.base_height  = runtime_info.screen_height;
-        info.geometry.max_width    = runtime_info.screen_width;
-        info.geometry.max_height   = runtime_info.screen_height;
-        info.geometry.aspect_ratio = aspect_ratio;
+        info.geometry.max_width    = GC_VIDEO_MAX_WIDTH;
+        info.geometry.max_height   = GC_VIDEO_MAX_HEIGHT;
+        info.geometry.aspect_ratio = current_aspect_ratio;
 
         environ_cb(RETRO_ENVIRONMENT_SET_GEOMETRY, &info.geometry);
     }
@@ -820,8 +854,10 @@ void retro_run(void)
 void retro_reset(void)
 {
     check_variables();
+    core->SetVideoChip(video_chip);
     load_bootroms();
     core->ResetROMPreservingRAM(&config);
+    check_variables();
 }
 
 static bool load_rom(const struct retro_game_info* info)
@@ -877,6 +913,7 @@ bool retro_load_game(const struct retro_game_info *info)
 
     core->GetCartridge()->Reset();
     check_variables();
+    core->SetVideoChip(video_chip);
     load_bootroms();
 
     if (!load_rom(info))
@@ -884,6 +921,8 @@ bool retro_load_game(const struct retro_game_info *info)
         log_cb(RETRO_LOG_ERROR, "Invalid or corrupted ROM.\n");
         return false;
     }
+
+    check_variables();
 
     enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_RGB565;
     if (!environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt))
@@ -894,7 +933,7 @@ bool retro_load_game(const struct retro_game_info *info)
 
     snprintf(retro_game_path, sizeof(retro_game_path), "%s", info->path ? info->path : "");
 
-    struct retro_memory_descriptor descs[7];
+    struct retro_memory_descriptor descs[6];
 
     memset(descs, 0, sizeof(descs));
 
@@ -907,25 +946,23 @@ bool retro_load_game(const struct retro_game_info *info)
     descs[1].start = 0x2000;
     descs[1].len   = 0x4000;
     // RAM
-    descs[2].ptr   = core->GetMemory()->GetRam();
-    descs[2].start = 0x6000;
-    descs[2].len   = 0x0400;
-    // RAM MIRROR
-    descs[3].ptr   = core->GetMemory()->GetRam();
-    descs[3].start = 0x7000;
-    descs[3].len   = 0x0400;
+    descs[2].ptr        = core->GetMemory()->GetRam();
+    descs[2].start      = 0x6000;
+    descs[2].select     = 0xE000;
+    descs[2].disconnect = 0x1C00;
+    descs[2].len        = 0x0400;
     // CART
-    descs[4].ptr   = core->GetCartridge()->GetROM();
-    descs[4].start = 0x8000;
-    descs[4].len   = core->GetCartridge()->GetROMSize();
+    descs[3].ptr   = core->GetCartridge()->GetROM();
+    descs[3].start = 0x8000;
+    descs[3].len   = core->GetCartridge()->GetROMSize();
     // SGM LOWER
-    descs[5].ptr   = core->GetMemory()->GetSGMRam();
-    descs[5].start = 0x010000;
-    descs[5].len   = 0x2000;
+    descs[4].ptr   = core->GetMemory()->GetSGMRam();
+    descs[4].start = 0x010000;
+    descs[4].len   = 0x2000;
     // SGM UPPER
-    descs[6].ptr   = core->GetMemory()->GetSGMRam() + 0x2000;
-    descs[6].start = 0x012000;
-    descs[6].len   = 0x6000;
+    descs[5].ptr   = core->GetMemory()->GetSGMRam() + 0x2000;
+    descs[5].start = 0x012000;
+    descs[5].len   = 0x6000;
 
     struct retro_memory_map mmaps;
     mmaps.descriptors = descs;
@@ -954,9 +991,7 @@ bool retro_load_game_special(unsigned type, const struct retro_game_info *info, 
 
 size_t retro_serialize_size(void)
 {
-    size_t size = 0;
-    core->SaveState(NULL, size);
-    return size;
+    return GC_LIBRETRO_SAVESTATE_SIZE;
 }
 
 bool retro_serialize(void *data, size_t size)

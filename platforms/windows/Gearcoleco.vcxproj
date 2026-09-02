@@ -29,6 +29,7 @@
     <ClCompile Include="..\..\src\ColecoVisionIOPorts.cpp" />
     <ClCompile Include="..\..\src\GearcolecoCore.cpp" />
     <ClCompile Include="..\..\src\Input.cpp" />
+    <ClCompile Include="..\..\src\Mapper.cpp" />
     <ClCompile Include="..\..\src\Memory.cpp" />
     <ClCompile Include="..\..\src\opcodes.cpp" />
     <ClCompile Include="..\..\src\opcodes_cb.cpp" />
@@ -36,7 +37,10 @@
     <ClCompile Include="..\..\src\Processor.cpp" />
     <ClCompile Include="..\..\src\TraceLogger.cpp" />
     <ClCompile Include="..\..\src\VgmRecorder.cpp" />
-    <ClCompile Include="..\..\src\Video.cpp" />
+    <ClCompile Include="..\..\src\TMS9918A.cpp" />
+    <ClCompile Include="..\..\src\F18A.cpp" />
+    <ClCompile Include="..\..\src\F18A_enhancements.cpp" />
+    <ClCompile Include="..\..\src\F18AGPU.cpp" />
     <ClCompile Include="..\shared\dependencies\miniz\miniz.c">
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
     </ClCompile>
@@ -58,7 +62,9 @@
     <ClCompile Include="..\shared\desktop\gui_debug_psg.cpp" />
     <ClCompile Include="..\shared\desktop\gui_debug_rewind.cpp" />
     <ClCompile Include="..\shared\desktop\gui_debug_tms9918.cpp" />
+    <ClCompile Include="..\shared\desktop\gui_debug_f18a.cpp" />
     <ClCompile Include="..\shared\desktop\gui_debug_trace_logger.cpp" />
+    <ClCompile Include="..\shared\desktop\trace_logger_formatter.cpp" />
     <ClCompile Include="..\shared\desktop\gui_filedialogs.cpp" />
     <ClCompile Include="..\shared\desktop\gui_menus.cpp" />
     <ClCompile Include="..\shared\desktop\gui_popups.cpp" />
@@ -132,6 +138,7 @@
     <ClInclude Include="..\..\src\MegaCartMapper.h" />
     <ClInclude Include="..\..\src\Memory.h" />
     <ClInclude Include="..\..\src\memory_stream.h" />
+    <ClInclude Include="..\..\src\random.h" />
     <ClInclude Include="..\..\src\Memory_inline.h" />
     <ClInclude Include="..\..\src\no_bios.h" />
     <ClInclude Include="..\..\src\OCMMapper.h" />
@@ -152,6 +159,9 @@
     <ClInclude Include="..\..\src\TraceLogger.h" />
     <ClInclude Include="..\..\src\VgmRecorder.h" />
     <ClInclude Include="..\..\src\Video.h" />
+    <ClInclude Include="..\..\src\TMS9918A.h" />
+    <ClInclude Include="..\..\src\F18A.h" />
+    <ClInclude Include="..\..\src\F18AGPU.h" />
     <ClInclude Include="..\shared\dependencies\glad\glad.h" />
     <ClInclude Include="..\shared\dependencies\miniz\miniz.h" />
     <ClInclude Include="..\shared\dependencies\imgui\imgui_impl_sdl3.h" />
@@ -178,6 +188,9 @@
     <ClInclude Include="..\shared\desktop\application_headless.h" />
     <ClInclude Include="..\shared\desktop\backers.h" />
     <ClInclude Include="..\shared\desktop\config.h" />
+    <ClInclude Include="..\shared\desktop\config_data.h" />
+    <ClInclude Include="..\shared\desktop\config_definitions.inc.h" />
+    <ClInclude Include="..\shared\desktop\config_macros.h" />
     <ClInclude Include="..\shared\desktop\console_utils.h" />
     <ClInclude Include="..\shared\desktop\emu.h" />
     <ClInclude Include="..\shared\desktop\gui.h" />
@@ -193,11 +206,14 @@
     <ClInclude Include="..\shared\desktop\gui_debug_rewind.h" />
     <ClInclude Include="..\shared\desktop\gui_debug_text.h" />
     <ClInclude Include="..\shared\desktop\gui_debug_tms9918.h" />
+    <ClInclude Include="..\shared\desktop\gui_debug_f18a.h" />
     <ClInclude Include="..\shared\desktop\gui_debug_trace_logger.h" />
+    <ClInclude Include="..\shared\desktop\trace_logger_formatter.h" />
     <ClInclude Include="..\shared\desktop\gui_debug_widgets.h" />
     <ClInclude Include="..\shared\desktop\gui_filedialogs.h" />
     <ClInclude Include="..\shared\desktop\gui_menus.h" />
     <ClInclude Include="..\shared\desktop\gui_popups.h" />
+    <ClInclude Include="..\..\src\ips_patch.h" />
     <ClInclude Include="..\shared\desktop\license.h" />
     <ClInclude Include="..\shared\desktop\mcp\mcp_debug_adapter.h" />
     <ClInclude Include="..\shared\desktop\mcp\mcp_manager.h" />
@@ -240,6 +256,7 @@
     <ConfigurationType>Application</ConfigurationType>
     <IntermediateDirectory>release\</IntermediateDirectory>
     <PrimaryOutput>Gearcoleco</PrimaryOutput>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'" Label="Configuration">
     <PlatformToolSet>v145</PlatformToolSet>
@@ -249,6 +266,7 @@
     <ConfigurationType>Application</ConfigurationType>
     <IntermediateDirectory>release\</IntermediateDirectory>
     <PrimaryOutput>Gearcoleco</PrimaryOutput>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <PlatformToolSet>v145</PlatformToolSet>
@@ -334,6 +352,7 @@
       <RandomizedBaseAddress>true</RandomizedBaseAddress>
       <SubSystem>Windows</SubSystem>
       <SuppressStartupBanner>true</SuppressStartupBanner>
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
     <Midl>
       <DefaultCharType>Unsigned</DefaultCharType>
@@ -375,6 +394,7 @@
       <RandomizedBaseAddress>true</RandomizedBaseAddress>
       <SubSystem>Windows</SubSystem>
       <SuppressStartupBanner>true</SuppressStartupBanner>
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
     <Midl>
       <DefaultCharType>Unsigned</DefaultCharType>

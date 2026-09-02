@@ -8,7 +8,7 @@
 [![License](https://img.shields.io/github/license/drhelius/Gearcoleco)](https://github.com/drhelius/Gearcoleco/blob/main/LICENSE)
 [![Twitter Follow](https://img.shields.io/twitter/follow/drhelius)](https://x.com/drhelius)
 
-Gearcoleco is a very accurate, cross-platform ColecoVision emulator written in C++ that runs on Windows, macOS, Linux, BSD and RetroArch, with an embedded MCP server for debugging and tooling.
+Gearcoleco is a very accurate, cross-platform ColecoVision emulator written in C++ that runs on Windows, macOS, Linux, BSD and RetroArch, with an embedded MCP server for AI debugging and development.
 
 This is an open source project with its ongoing development made possible thanks to the support by these awesome [backers](backers.md). If you find it useful, please consider [sponsoring](https://github.com/sponsors/drhelius).
 
@@ -30,11 +30,11 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
     <tr>
       <td rowspan="2"><strong>Windows</strong></td>
       <td>Desktop x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-desktop-windows-x64.zip">Gearcoleco-1.6.9-desktop-windows-x64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-desktop-windows-x64.zip">Gearcoleco-1.6.13-desktop-windows-x64.zip</a></td>
     </tr>
     <tr>
       <td>Desktop ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-desktop-windows-arm64.zip">Gearcoleco-1.6.9-desktop-windows-arm64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-desktop-windows-arm64.zip">Gearcoleco-1.6.13-desktop-windows-arm64.zip</a></td>
     </tr>
     <tr>
       <td rowspan="3"><strong>macOS</strong></td>
@@ -43,11 +43,11 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
     </tr>
     <tr>
       <td>Desktop Apple Silicon</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-desktop-macos-arm64.zip">Gearcoleco-1.6.9-desktop-macos-arm64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-desktop-macos-arm64.zip">Gearcoleco-1.6.13-desktop-macos-arm64.zip</a></td>
     </tr>
     <tr>
       <td>Desktop Intel</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-desktop-macos-intel.zip">Gearcoleco-1.6.9-desktop-macos-intel.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-desktop-macos-intel.zip">Gearcoleco-1.6.13-desktop-macos-intel.zip</a></td>
     </tr>
     <tr>
       <td rowspan="5"><strong>Linux</strong></td>
@@ -60,15 +60,15 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
     </tr>
     <tr>
       <td>Desktop Ubuntu 24.04 x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-desktop-ubuntu24.04-x64.zip">Gearcoleco-1.6.9-desktop-ubuntu24.04-x64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-desktop-ubuntu24.04-x64.zip">Gearcoleco-1.6.13-desktop-ubuntu24.04-x64.zip</a></td>
     </tr>
     <tr>
       <td>Desktop Ubuntu 22.04 x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-desktop-ubuntu22.04-x64.zip">Gearcoleco-1.6.9-desktop-ubuntu22.04-x64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-desktop-ubuntu22.04-x64.zip">Gearcoleco-1.6.13-desktop-ubuntu22.04-x64.zip</a></td>
     </tr>
     <tr>
       <td>Desktop Ubuntu 24.04 ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.9/Gearcoleco-1.6.9-desktop-ubuntu24.04-arm64.zip">Gearcoleco-1.6.9-desktop-ubuntu24.04-arm64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-desktop-ubuntu24.04-arm64.zip">Gearcoleco-1.6.13-desktop-ubuntu24.04-arm64.zip</a></td>
     </tr>
     <tr>
       <td><strong>MCPB</strong></td>
@@ -95,8 +95,9 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
 
 ## Features
 
-- Very accurate Z80 core, TMS9918 VDP, SN76489 PSG and AY-3-8910 SGM emulation.
+- Very accurate Z80 core, TMS9918A VDP, SN76489 PSG and AY-3-8910 SGM emulation.
 - Support for ColecoVision Super Game Module (SGM) and MegaCart ROMs.
+- Optional F18A v1.9 emulation.
 - Support for Super Action Controller (SAC), Wheel Controller and Roller Controller.
 - Save states with preview and rewind support.
 - Run-ahead support to reduce input latency.
@@ -134,21 +135,21 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
 gearcoleco [options] [rom_file] [symbol_file]
 
 Arguments:
-  [rom_file]               ROM file: accepts ROMs (.col, .cv, .rom, .bin) or ZIP (.zip)
-  [symbol_file]            Optional symbol file for debugging
+  [rom_file]                  ROM file: accepts ROMs (.col, .cv, .rom, .bin) or ZIP (.zip)
+  [symbol_file]               Optional symbol file for debugging
 
 Options:
-  -f, --fullscreen         Start in fullscreen mode
-  -w, --windowed           Start in windowed mode with menu visible
-      --mcp-stdio          Auto-start MCP server with stdio transport
-      --mcp-http           Auto-start MCP server with HTTP transport
-      --mcp-router         Enable compact MCP tool routing
-      --mcp-http-address A HTTP bind address (default: 127.0.0.1)
-      --mcp-http-port N    HTTP port for MCP server (default: 7777)
-      --headless           Run without GUI (requires --mcp-stdio or --mcp-http)
-        --portable           Store configuration and user data beside the application
-  -v, --version            Display version information
-  -h, --help               Display this help message
+  -f, --fullscreen            Start in fullscreen mode
+  -w, --windowed              Start in windowed mode with menu visible
+      --mcp-stdio             Auto-start MCP server with stdio transport
+      --mcp-http              Auto-start MCP server with HTTP transport
+      --mcp-router            Enable compact MCP tool routing
+      --mcp-http-address A    HTTP bind address (default: 127.0.0.1)
+      --mcp-http-port N       HTTP port for MCP server (default: 7777)
+      --headless              Run without GUI (requires --mcp-stdio or --mcp-http)
+      --portable              Store configuration and user data beside the application
+  -v, --version               Display version information
+  -h, --help                  Display this help message
 ```
 
 ### MCP Server

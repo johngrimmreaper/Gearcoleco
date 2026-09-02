@@ -73,6 +73,38 @@ struct retro_core_option_v2_definition option_defs_us[] = {
         },
         "Auto"
     },
+    {
+        "gearcoleco_mapper",
+        "Mapper (restart)",
+        NULL,
+        "Select which mapper (memory bank controller) is emulated. 'Auto' automatically detects the appropriate mapper based on the loaded content. Only change this if a game does not work correctly with the default setting.",
+        NULL,
+        "system",
+        {
+            { "Auto",       NULL },
+            { "Standard",   NULL },
+            { "MegaCart",   NULL },
+            { "Activision", NULL },
+            { "OCM",        NULL },
+            { NULL, NULL },
+        },
+        "Auto"
+    },
+    {
+        "gearcoleco_video_chip",
+        "Video Chip (restart)",
+        NULL,
+        "Select the installed video chip. 'Auto' uses TMS9918A unless the loaded game database entry requires F18A. Changes take effect when content is restarted.",
+        NULL,
+        "system",
+        {
+            { "Auto",     NULL },
+            { "TMS9918A", NULL },
+            { "F18A",     NULL },
+            { NULL, NULL },
+        },
+        "Auto"
+    },
 
     /* Video */
 
@@ -96,7 +128,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
         "gearcoleco_overscan",
         "Overscan",
         NULL,
-        "Select which overscan (borders) will be used in emulation. 'Disabled' shows no overscan. 'Top+Bottom' enables vertical overscan only. 'Full (284 width)' and 'Full (320 width)' enable full overscan with different horizontal widths.",
+        "Select which overscan (borders) will be used in TMS9918A emulation. 'Disabled' shows no overscan. 'Top+Bottom' enables vertical overscan only. 'Full (284 width)' and 'Full (320 width)' enable full overscan with different horizontal widths. F18A output uses its active logical raster without TMS overscan.",
         NULL,
         "video",
         {

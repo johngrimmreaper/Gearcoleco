@@ -36,6 +36,8 @@ static bool storage_dirty = true;
 static int seek_age = -1;
 static size_t slot_size = 0;
 static size_t allocated_size = 0;
+static int snapshot_width = 0;
+static int snapshot_height = 0;
 
 static int slot_at(int age);
 static int get_target_capacity(void);
@@ -78,23 +80,15 @@ void rewind_reset(void)
         release_storage();
         return;
     }
-
-    capacity = get_target_capacity();
-    ensure_storage();
 }
 
 void rewind_push(void)
 {
     if (!config_rewind.enabled)
         return;
-    if (!IsValidPointer(buffer))
-        return;
     if (emu_is_empty() || emu_is_paused())
         return;
     if (active)
-        return;
-
-    if (!ensure_storage())
         return;
 
     frame_accum++;
@@ -102,13 +96,32 @@ void rewind_push(void)
         return;
     frame_accum = 0;
 
+    GC_RuntimeInfo runtime;
+    if (emu_get_core()->GetRuntimeInfo(runtime) &&
+        ((runtime.screen_width != snapshot_width) || (runtime.screen_height != snapshot_height)))
+    {
+        storage_dirty = true;
+    }
+
+    if (!ensure_storage())
+        return;
+
     u8* slot = buffer + ((size_t)head * slot_size);
     size_t size = slot_size;
 
     if (!emu_get_core()->SaveState(slot, size, true))
     {
-        Log("Rewind: failed to save snapshot into %zu-byte slot", slot_size);
-        return;
+        storage_dirty = true;
+        if (!ensure_storage())
+            return;
+
+        slot = buffer + ((size_t)head * slot_size);
+        size = slot_size;
+        if (!emu_get_core()->SaveState(slot, size, true))
+        {
+            Log("Rewind: failed to save snapshot into %zu-byte slot", slot_size);
+            return;
+        }
     }
 
     sizes[head] = size;
@@ -246,15 +259,23 @@ static bool ensure_storage(void)
     }
 
     int target_capacity = get_target_capacity();
+    if (!storage_dirty && IsValidPointer(buffer) && (capacity == target_capacity))
+        return true;
+
     size_t target_slot_size = get_target_slot_size();
     if (target_slot_size == 0)
         return false;
 
-    if (!storage_dirty && IsValidPointer(buffer) && (capacity == target_capacity) && (slot_size >= target_slot_size))
-        return true;
+    GC_RuntimeInfo runtime;
+    bool runtime_valid = emu_get_core()->GetRuntimeInfo(runtime);
 
     if (storage_dirty && IsValidPointer(buffer) && (capacity == target_capacity) && (slot_size >= target_slot_size))
     {
+        if (runtime_valid)
+        {
+            snapshot_width = runtime.screen_width;
+            snapshot_height = runtime.screen_height;
+        }
         storage_dirty = false;
         return true;
     }
@@ -278,6 +299,13 @@ static bool ensure_storage(void)
     active = false;
     storage_dirty = false;
     seek_age = -1;
+
+    if (runtime_valid)
+    {
+        snapshot_width = runtime.screen_width;
+        snapshot_height = runtime.screen_height;
+    }
+
     for (int i = 0; i < REWIND_MAX_SNAPSHOTS; i++)
         sizes[i] = 0;
 
@@ -293,6 +321,8 @@ static void release_storage(void)
     allocated_size = 0;
     slot_size = 0;
     capacity = 0;
+    snapshot_width = 0;
+    snapshot_height = 0;
 }
 
 static void truncate_to_seek_position(void)
@@ -314,23 +344,24 @@ static void restore_screenshot(const u8* slot, size_t size)
     if (size <= sizeof(GC_SaveState_Header))
         return;
 
-    const GC_SaveState_Header* header = reinterpret_cast<const GC_SaveState_Header*>(
-        slot + size - sizeof(GC_SaveState_Header));
+    GC_SaveState_Header header;
+    memcpy(&header, slot + size - sizeof(GC_SaveState_Header), sizeof(header));
 
-    if (header->magic != GC_SAVESTATE_MAGIC)
+    if (header.magic != GC_SAVESTATE_MAGIC)
         return;
-    if (header->screenshot_size == 0)
-        return;
-
-    size_t max_screenshot_size = (size_t)GC_RESOLUTION_WIDTH_WITH_OVERSCAN * GC_RESOLUTION_HEIGHT_WITH_OVERSCAN * 4;
-    if (header->screenshot_size > max_screenshot_size)
+    if (header.screenshot_size == 0)
         return;
 
-    if (header->screenshot_size > (size - sizeof(GC_SaveState_Header)))
+    size_t max_screenshot_size = (size_t)GC_VIDEO_MAX_WIDTH * GC_VIDEO_MAX_HEIGHT * 4;
+
+    if (header.screenshot_size > max_screenshot_size)
         return;
 
-    size_t screenshot_offset = size - sizeof(GC_SaveState_Header) - header->screenshot_size;
+    if (header.screenshot_size > (size - sizeof(GC_SaveState_Header)))
+        return;
+
+    size_t screenshot_offset = size - sizeof(GC_SaveState_Header) - header.screenshot_size;
     const u8* screenshot_data = slot + screenshot_offset;
 
-    memcpy(emu_frame_buffer, screenshot_data, header->screenshot_size);
+    memcpy(emu_frame_buffer, screenshot_data, header.screenshot_size);
 }

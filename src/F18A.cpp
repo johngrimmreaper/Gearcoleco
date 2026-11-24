@@ -18,13 +18,11 @@
  */
 
 #include "F18A.h"
-#include "Memory.h"
 #include "Processor.h"
 #include "TraceLogger.h"
 
-F18A::F18A(Memory* pMemory, Processor* pProcessor)
+F18A::F18A(Processor* pProcessor)
 {
-    m_pMemory = pMemory;
     m_pProcessor = pProcessor;
     InitPointer(m_pTraceLogger);
     InitPointer(m_pInfoBuffer);
@@ -179,6 +177,130 @@ void F18A::LogVDPEvent(u8 event, u8 reg, u8 raw, int sprite, int auxiliary)
 #endif
 }
 
+void F18A::LogSpriteBudget(int line, bool enhanced)
+{
+#if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
+    bool trace_budget = m_pTraceLogger->IsEventEnabled(TRACE_VDP, TRACE_VDP_SPRITE_BUDGET);
+    bool trace_limit = m_pTraceLogger->IsEventEnabled(TRACE_VDP, TRACE_VDP_SPRITE_LIMIT);
+
+    if (!trace_budget && !trace_limit)
+        return;
+
+    int requested = 0;
+    int sprite_limit = m_VdpRegister[30] & 0x1F;
+    bool unlimited = (sprite_limit == 31);
+
+    if (enhanced)
+    {
+        if (!m_f18a_mode.sprites_enabled)
+            return;
+
+        int sat = (m_VdpRegister[5] & 0x7F) << 7;
+        int stop_sprite = m_VdpRegister[51] & 0x3F;
+        int magnification = IsSetBit(m_VdpRegister[1], 0) ? 2 : 1;
+
+        for (int sprite = 0; sprite < 32; sprite++)
+        {
+            if ((stop_sprite < 32) && (sprite == stop_sprite))
+                break;
+
+            int offset = sat + (sprite << 2);
+            u8 raw_y = ReadVRAM((u16)offset);
+
+            if (!m_f18a_mode.row30 && (raw_y == 0xD0))
+                break;
+
+            bool sprite_size_16 = IsSetBit(m_VdpRegister[1], 1);
+            if (m_f18a_unlocked && IsSetBit(ReadVRAM((u16)(offset + 3)), 4))
+                sprite_size_16 = true;
+            int display_size = (sprite_size_16 ? 16 : 8) * magnification;
+            int top = IsSetBit(m_VdpRegister[49], 3) ? raw_y : ((raw_y + 1) & 0xFF);
+            int delta_y = ((u8)line - (u8)top) & 0xFF;
+
+            if (delta_y < display_size)
+                requested++;
+        }
+    }
+    else
+    {
+        int sprite_size = IsSetBit(m_VdpRegister[1], 1) ? 16 : 8;
+
+        if (IsSetBit(m_VdpRegister[1], 0))
+            sprite_size *= 2;
+
+        for (int sprite = 0; sprite < GC_MAX_SPRITES; sprite++)
+        {
+            int sprite_y = m_SpriteAttribLatch[sprite << 2];
+
+            if (sprite_y == 0xD0)
+                break;
+
+            sprite_y = (sprite_y + 1) & 0xFF;
+
+            if (sprite_y >= 0xE0)
+                sprite_y = -(0x100 - sprite_y);
+
+            if ((sprite_y <= line) && ((sprite_y + sprite_size) > line))
+                requested++;
+        }
+    }
+
+    int max_sprites = unlimited ? GC_MAX_SPRITES : sprite_limit;
+    bool limit = requested > max_sprites;
+
+    if (!trace_budget && !limit)
+        return;
+
+    bool render_all = unlimited || (!enhanced && m_bNoSpriteLimit);
+
+    GC_Trace_Entry e = {};
+    e.type = TRACE_VDP;
+    e.vdp.raw = (u8)max_sprites;
+    e.vdp.effective = (u8)(render_all ? requested : MIN(requested, max_sprites));
+    e.vdp.mode = (u8)m_iMode;
+    e.vdp.line = (u16)line;
+    e.vdp.hpos = (u16)m_iCycleCounter;
+    e.vdp.auxiliary = (u16)requested;
+
+    if (trace_budget)
+    {
+        e.vdp.event = TRACE_VDP_SPRITE_BUDGET;
+        m_pTraceLogger->TraceLog(e);
+    }
+
+    if (trace_limit && limit)
+    {
+        e.vdp.event = TRACE_VDP_SPRITE_LIMIT;
+        m_pTraceLogger->TraceLog(e);
+    }
+#else
+    UNUSED(line);
+    UNUSED(enhanced);
+#endif
+}
+
+void F18A::LogMissedVBlank()
+{
+#if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
+    u32 misses = m_pProcessor->UpdateVBlankWatch();
+
+    if (misses == 0)
+        return;
+
+    GC_Trace_Entry e = {};
+    e.type = TRACE_VDP;
+    e.vdp.event = TRACE_VDP_MISSED_VBLANK;
+    e.vdp.address = m_pProcessor->GetVBlankWatchAddress();
+    e.vdp.raw = (m_pProcessor->GetVBlankWatchAccess(true) ? 0x01 : 0x00) |
+        (m_pProcessor->GetVBlankWatchAccess(false) ? 0x02 : 0x00);
+    e.vdp.auxiliary = (u16)MIN(misses, 0xFFFFU);
+    e.vdp.mode = (u8)m_iMode;
+    e.vdp.line = (u16)m_iRenderLine;
+    e.vdp.hpos = (u16)m_iCycleCounter;
+    m_pTraceLogger->TraceLog(e);
+#endif
+}
+
 void F18A::Reset(bool bPAL)
 {
     m_bPAL = bPAL;
@@ -245,6 +367,7 @@ bool F18A::Tick(unsigned int clockCycles)
         {
             m_LineEvents.vint = true;
 
+            TraceMissedVBlank();
             TraceVDPEvent(TRACE_VDP_VINT_FLAG);
             TraceVDPEvent(TRACE_VDP_VBLANK);
             m_VdpStatus = SetBit(m_VdpStatus, 7);
@@ -352,12 +475,12 @@ void F18A::WriteControl(u8 control)
     {
         m_bFirstByteInSequence = false;
         m_VdpAddress = (m_VdpAddress & 0x3F00) | control;
-        m_VdpBuffer = control;
     }
     else
     {
         m_bFirstByteInSequence = true;
-        m_VdpAddress = ((control & 0x3F) << 8) | m_VdpBuffer;
+        u8 data = (u8)m_VdpAddress;
+        m_VdpAddress = ((control & 0x3F) << 8) | data;
 
         if ((control & 0xC0) == 0x00)
         {
@@ -368,11 +491,11 @@ void F18A::WriteControl(u8 control)
         else if ((control & 0x80) != 0)
         {
             u8 reg = control & 0x3F;
-            WriteVDPRegister(reg, m_VdpBuffer);
+            WriteVDPRegister(reg, data);
 #if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
             m_pProcessor->CheckMemoryBreakpoints(Processor::GC_BREAKPOINT_TYPE_VDP_REGISTER, reg, false);
 #endif
-            TraceVDPEvent(TRACE_VDP_REG_WRITE, reg, m_VdpBuffer);
+            TraceVDPEvent(TRACE_VDP_REG_WRITE, reg, data);
         }
     }
 }
@@ -428,7 +551,10 @@ void F18A::ScanLine(int line)
             RenderBackground(line);
 
             if (m_iMode != 0x01)
+            {
                 RenderSprites(line);
+                TraceSpriteBudget(line, false);
+            }
         }
     }
     else
@@ -843,6 +969,14 @@ void F18A::Render16bit(u16* srcFrameBuffer, u8* dstFrameBuffer, GC_Color_Format 
     }
 }
 
+void F18A::RenderIndices(u16* srcFrameBuffer, u8* dstIndexBuffer, int size, bool overscan)
+{
+    UNUSED(overscan);
+
+    for (int i = 0; i < size; i++)
+        dstIndexBuffer[i] = (u8)srcFrameBuffer[i];
+}
+
 void F18A::SetCustomPalette(GC_Color* palette)
 {
     for (int i = 0; i < 16; i++)
@@ -908,6 +1042,26 @@ void F18A::SetOverscan(Overscan overscan)
 F18A::Overscan F18A::GetOverscan()
 {
     return m_Overscan;
+}
+
+void F18A::GetBackdropColor(u8* rgb)
+{
+    int color;
+    int legacy_mode = ((m_VdpRegister[0] & 0x04) << 1) | ((m_VdpRegister[0] & 0x02) << 1) |
+        ((m_VdpRegister[1] & 0x08) >> 2) | ((m_VdpRegister[1] & 0x10) >> 4);
+
+    if (m_f18a_unlocked || (legacy_mode >= 9))
+        color = ((m_VdpRegister[24] & 3) << 4) | (m_VdpRegister[7] & 0x0F);
+    else
+    {
+        color = m_VdpRegister[7] & 0x0F;
+        color = (color > 0) ? color : 1;
+    }
+
+    color *= 3;
+    rgb[0] = m_f18a_palette_888_rgb[color];
+    rgb[1] = m_f18a_palette_888_rgb[color + 1];
+    rgb[2] = m_f18a_palette_888_rgb[color + 2];
 }
 
 void F18A::SaveState(std::ostream& stream)

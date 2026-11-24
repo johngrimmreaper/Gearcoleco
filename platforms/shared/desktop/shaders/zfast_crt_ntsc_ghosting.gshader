@@ -1,10 +1,11 @@
-; Zfast CRT + NTSC + Ghosting preset for Geargrafx.
-; Combines the Geargrafx NTSC color artifact pass, zfast CRT, and feedback ghosting.
+; Zfast CRT + NTSC + Ghosting preset for Gearcoleco.
+; Combines the Gearcoleco NTSC color artifact pass, zfast CRT, and feedback ghosting.
 ; The zfast CRT pass is a derivative work based on zfast CRT by Greg Hogan / SoltanGris42.
 ; Original zfast CRT shader licensed GPL v2 or later.
 
 [Preset]
 Name=Zfast CRT + NTSC + Ghosting
+Group=Zfast CRT
 Passes=3
 
 [Pass0]

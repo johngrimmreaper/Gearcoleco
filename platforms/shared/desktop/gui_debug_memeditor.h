@@ -26,6 +26,10 @@
 #include <iostream>
 #include "imgui.h"
 
+typedef bool (*MemEditorReadCallback)(int address, uint8_t* value, void* user_data);
+typedef bool (*MemEditorWriteCallback)(int address, uint8_t value, void* user_data);
+typedef bool (*MemEditorCanWriteCallback)(int address, void* user_data);
+
 class MemEditor
 {
 public:
@@ -64,6 +68,9 @@ public:
     ~MemEditor();
 
     void Reset(const char* title, uint8_t* mem_data, int mem_size, int base_display_addr = 0x0000, int word = 1);
+    void Reset(const char* title, int mem_size, MemEditorReadCallback read_callback,
+        MemEditorWriteCallback write_callback, MemEditorCanWriteCallback can_write_callback,
+        void* user_data, int base_display_addr = 0x0000, int word = 1);
     void Draw(bool ascii = true, bool preview = true, bool options = true, bool cursors = true);
     void DrawWatchWindow();
     void DrawSearchWindow();
@@ -85,7 +92,6 @@ public:
     void OpenFindBytes();
     void OpenFindText();
     void AddWatch();
-    void PrepareAddWatch(int address, const char* notes);
     bool AddWatchDirect(int address, const char* notes, int size);
     void RemoveWatches();
     std::vector<Watch>* GetWatches();
@@ -93,8 +99,8 @@ public:
     void BookMarkPopup();
     void WatchPopup();
     void DrawFindBytesWindow();
+    bool ConsumeShowRequest();
     void SaveSettings(std::ostream& stream);
-    void LoadSettings(std::istream& stream);
     Options GetOptions() const;
     void SetOptions(const Options& options);
     void StepFrame();
@@ -109,10 +115,22 @@ public:
     int FindSequence(const char* value, bool text, bool case_sensitive, int* out_addresses, int max_results);
 
 private:
+    void ResetInternal(const char* title, uint8_t* mem_data, int mem_size,
+        MemEditorReadCallback read_callback, MemEditorWriteCallback write_callback,
+        MemEditorCanWriteCallback can_write_callback, void* user_data,
+        int base_display_addr, int word);
+    bool HasMemory() const;
+    bool ReadByte(int address, uint8_t* value) const;
+    bool ReadValue(int address, int size, uint32_t* value) const;
+    bool CanWriteByte(int address) const;
+    bool CanWriteRange(int address, int size) const;
+    bool WriteByte(int address, uint8_t value);
+    bool WriteValue(int address, int size, uint32_t value);
     bool IsColumnSeparator(int current_column, int column_count);
     void DrawSelectionBackground(int x, int address, ImVec2 cellPos, ImVec2 cellSize);
     void DrawSelectionAsciiBackground(int address, ImVec2 cellPos, ImVec2 cellSize);
     void DrawSelectionFrame(int x, int y, int address, ImVec2 cellPos, ImVec2 cellSize);
+    void DrawFrameRect(ImVec2 minimum, ImVec2 maximum, ImU32 color);
     void HandleSelection(int address, int row);
     void DrawCursors();
     void DrawOptions();
@@ -155,6 +173,10 @@ private:
     int m_jump_to_address;
     int m_scroll_to_address;
     uint8_t* m_mem_data;
+    MemEditorReadCallback m_read_callback;
+    MemEditorWriteCallback m_write_callback;
+    MemEditorCanWriteCallback m_can_write_callback;
+    void* m_callback_user_data;
     int m_mem_size;
     int m_mem_base_addr;
     char m_hex_addr_format[16];
@@ -166,8 +188,6 @@ private:
     std::vector<Bookmark> m_bookmarks;
     bool m_watch_window;
     bool m_add_watch;
-    int m_pending_watch_address;
-    char m_pending_watch_notes[128];
     std::vector<Watch> m_watches;
     ImFont* m_gui_font;
     ImDrawList* m_draw_list;
@@ -190,6 +210,7 @@ private:
     int m_find_bytes_last_address;
     int m_find_bytes_pattern_len;
     std::vector<int> m_find_bytes_results;
+    bool m_show_request;
 };
 
 #endif /* GUI_DEBUG_MEMEDITOR_H */

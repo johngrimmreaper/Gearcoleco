@@ -1,8 +1,9 @@
-; CRT Consumer + NTSC preset for Geargrafx.
+; CRT Consumer + NTSC preset for Gearcoleco.
 ; Adds a color-only NTSC YIQ pass before the CRT Consumer pass.
 
 [Preset]
 Name=CRT Consumer + NTSC
+Group=CRT Consumer
 Passes=2
 
 [Pass0]

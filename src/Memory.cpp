@@ -43,10 +43,14 @@ Memory::Memory(Cartridge* pCartridge, Random* pRandom)
     InitPointer(m_pMapper);
     InitPointer(m_pStandardMapper);
     InitPointer(m_pTraceLogger);
+    InitPointer(m_pAdam);
     InitPointer(m_pDisassembledRomMap);
     InitPointer(m_pDisassembledRamMap);
     InitPointer(m_pDisassembledBiosMap);
     InitPointer(m_pDisassembledSGMRamMap);
+    InitPointer(m_pDisassembledAdamMap);
+    InitPointer(m_pDisassembledAdamGeneration);
+    m_AdamDisassemblerGeneration = 0;
     InitPointer(m_pBios);
     InitPointer(m_pRam);
     InitPointer(m_pSGMRam);
@@ -98,11 +102,27 @@ Memory::~Memory()
         }
         SafeDeleteArray(m_pDisassembledSGMRamMap);
     }
+
+    if (IsValidPointer(m_pDisassembledAdamMap))
+    {
+        for (int i = 0; i < 0x10000; i++)
+        {
+            SafeDelete(m_pDisassembledAdamMap[i]);
+        }
+        SafeDeleteArray(m_pDisassembledAdamMap);
+    }
+
+    SafeDeleteArray(m_pDisassembledAdamGeneration);
 }
 
 void Memory::SetProcessor(Processor* pProcessor)
 {
     m_pProcessor = pProcessor;
+}
+
+void Memory::SetAdam(Adam* adam)
+{
+    m_pAdam = adam;
 }
 
 void Memory::SetTraceLogger(TraceLogger* pTraceLogger)
@@ -146,6 +166,15 @@ void Memory::Init()
     {
         InitPointer(m_pDisassembledSGMRamMap[i]);
     }
+
+    m_pDisassembledAdamMap = new GC_Disassembler_Record*[0x10000];
+    for (int i = 0; i < 0x10000; i++)
+    {
+        InitPointer(m_pDisassembledAdamMap[i]);
+    }
+
+    m_pDisassembledAdamGeneration = new u32[0x10000];
+    memset(m_pDisassembledAdamGeneration, 0, sizeof(u32) * 0x10000);
 #endif
 
     Reset();
@@ -182,6 +211,17 @@ void Memory::SetupMapper()
 void Memory::Reset()
 {
     m_iTotalCycles = 0;
+
+    if (IsValidPointer(m_pAdam) && m_pAdam->IsEnabled())
+    {
+        m_bSGMUpper = false;
+        m_bSGMLower = false;
+        memset(m_pRam, 0, 0x400);
+        memset(m_pSGMRam, 0, 0x8000);
+        m_pBios[0x69] = 0x3C;
+        return;
+    }
+
     m_bSGMUpper = (m_pCartridge->GetType() == Cartridge::CartridgeOCM);
     m_bSGMLower = false;
 
@@ -248,11 +288,13 @@ void Memory::LoadBios(const char* szFilePath)
 
         u8 bios[0x2000];
         file.seekg(0, ios::beg);
+
         if (!file.read(reinterpret_cast<char*>(bios), size))
         {
             Log("There was a problem reading the BIOS file %s", szFilePath);
             return;
         }
+
         file.close();
 
         LoadBiosFromBuffer(bios, size);
@@ -307,7 +349,7 @@ u32 Memory::GetRomBankAddress()
     return IsValidPointer(m_pMapper) ? m_pMapper->GetRomBankAddress() : 0;
 }
 
-bool Memory::IsBiosLoaded()
+bool Memory::IsBiosLoaded() const
 {
     return m_bBiosLoaded;
 }
@@ -363,6 +405,19 @@ void Memory::ResetRomDisassembledMemory()
         }
     }
 
+    if (IsValidPointer(m_pDisassembledAdamMap))
+    {
+        for (int i = 0; i < 0x10000; i++)
+        {
+            SafeDelete(m_pDisassembledAdamMap[i]);
+        }
+    }
+
+    if (IsValidPointer(m_pDisassembledAdamGeneration))
+        memset(m_pDisassembledAdamGeneration, 0, sizeof(u32) * 0x10000);
+
+    m_AdamDisassemblerGeneration = IsValidPointer(m_pAdam) ? m_pAdam->GetMemoryMapGeneration() : 0;
+
     #endif
 }
 
@@ -373,6 +428,9 @@ GC_Disassembler_Record* Memory::GetOrCreateDisassemblerRecord(u16 address)
     GC_Disassembler_Record** map = NULL;
     int offset = address;
     int bank = 0;
+
+    if (IsValidPointer(m_pAdam) && m_pAdam->IsEnabled())
+        return GetOrCreateAdamDisassemblerRecord(address);
 
     switch (address & 0xE000)
     {
@@ -463,12 +521,23 @@ GC_Disassembler_Record* Memory::GetOrCreateDisassemblerRecord(u16 address)
         }
     }
 
+    return GetOrCreateDisassemblerRecord(map, offset, bank);
+
+#else
+    UNUSED(address);
+    return NULL;
+#endif
+}
+
+GC_Disassembler_Record* Memory::GetOrCreateDisassemblerRecord(GC_Disassembler_Record** map,
+    int offset, int bank)
+{
+#ifndef GEARCOLECO_DISABLE_DISASSEMBLER
     GC_Disassembler_Record* record = map[offset];
 
     if (!IsValidPointer(record))
     {
         record = new GC_Disassembler_Record();
-        record->address = offset;
         record->bank = (u8)bank;
         record->segment[0] = 0;
         record->name[0] = 0;
@@ -493,7 +562,9 @@ GC_Disassembler_Record* Memory::GetOrCreateDisassemblerRecord(u16 address)
     return record;
 
 #else
-    UNUSED(address);
+    UNUSED(map);
+    UNUSED(offset);
+    UNUSED(bank);
     return NULL;
 #endif
 }
@@ -504,6 +575,12 @@ GC_Disassembler_Record* Memory::GetDisassemblerRecord(u16 address)
 
     GC_Disassembler_Record** map = NULL;
     int offset = address;
+
+    if (IsValidPointer(m_pAdam) && m_pAdam->IsEnabled())
+    {
+        SyncAdamDisassemblerMap();
+        return GetAdamDisassemblerRecord(address, GetBank(address));
+    }
 
     switch (address & 0xE000)
     {
@@ -585,7 +662,77 @@ GC_Disassembler_Record* Memory::GetDisassemblerRecord(u16 address)
 #endif
 }
 
+void Memory::SyncAdamDisassemblerMap()
+{
+#ifndef GEARCOLECO_DISABLE_DISASSEMBLER
+    if (!IsValidPointer(m_pAdam) || !IsValidPointer(m_pDisassembledAdamMap))
+        return;
+
+    u32 generation = m_pAdam->GetMemoryMapGeneration();
+    m_AdamDisassemblerGeneration = generation;
+#endif
+}
+
+GC_Disassembler_Record** Memory::GetDisassemblerAdamMap()
+{
+#ifndef GEARCOLECO_DISABLE_DISASSEMBLER
+    SyncAdamDisassemblerMap();
+    for (int i = 0; i < 0x10000; i++)
+    {
+        if (IsValidPointer(m_pDisassembledAdamMap[i]))
+            GetAdamDisassemblerRecord((u16)i, GetBank((u16)i));
+    }
+#endif
+    return m_pDisassembledAdamMap;
+}
+
+GC_Disassembler_Record* Memory::GetOrCreateAdamDisassemblerRecord(u16 address)
+{
+#ifndef GEARCOLECO_DISABLE_DISASSEMBLER
+    SyncAdamDisassemblerMap();
+    u8 bank = GetBank(address);
+
+    if (!IsValidPointer(GetAdamDisassemblerRecord(address, bank)))
+        m_pDisassembledAdamGeneration[address] = m_AdamDisassemblerGeneration;
+
+    return GetOrCreateDisassemblerRecord(m_pDisassembledAdamMap, address, bank);
+#else
+    UNUSED(address);
+    return NULL;
+#endif
+}
+
+GC_Disassembler_Record* Memory::GetAdamDisassemblerRecord(u16 address, u8 bank)
+{
+#ifndef GEARCOLECO_DISABLE_DISASSEMBLER
+    GC_Disassembler_Record* record = m_pDisassembledAdamMap[address];
+
+    if (IsValidPointer(record) &&
+        ((m_pDisassembledAdamGeneration[address] != m_AdamDisassemblerGeneration) ||
+        (record->bank != bank) ||
+        (record->jump && ((address ^ record->jump_address) & 0xE000) &&
+        m_pCartridge->IsReady() && (record->jump_bank != GetBank(record->jump_address)))))
+    {
+        SafeDelete(m_pDisassembledAdamMap[address]);
+    }
+
+    return m_pDisassembledAdamMap[address];
+#else
+    UNUSED(address);
+    UNUSED(bank);
+    return NULL;
+#endif
+}
+
 u32 Memory::GetPhysicalAddress(u16 address)
+{
+    if (IsValidPointer(m_pAdam) && m_pAdam->IsEnabled())
+        return address;
+
+    return GetCartridgeROMOffset(address);
+}
+
+u32 Memory::GetCartridgeROMOffset(u16 address)
 {
     if (address < 0x8000)
         return (u32)address;
@@ -624,6 +771,12 @@ u32 Memory::GetPhysicalAddress(u16 address)
 
 u8 Memory::GetBank(u16 address)
 {
+    if (IsValidPointer(m_pAdam) && m_pAdam->IsEnabled() &&
+        (m_pAdam->GetMemorySource(address) != Adam::MemorySourceCartridge))
+    {
+        return 0;
+    }
+
     if (address < 0x8000)
         return 0;
 

@@ -1,9 +1,10 @@
-; Zfast CRT preset for Geargrafx.
+; Zfast CRT preset for Gearcoleco.
 ; This is a derivative work based on zfast CRT by Greg Hogan / SoltanGris42.
 ; Original shader licensed GPL v2 or later.
 
 [Preset]
 Name=Zfast CRT
+Group=Zfast CRT
 Passes=1
 
 [Pass0]

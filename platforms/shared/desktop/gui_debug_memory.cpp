@@ -21,6 +21,7 @@
 #include "gui_debug_memory.h"
 
 #include "gearcoleco.h"
+#include "Adam.h"
 #include "imgui.h"
 #include "gui_debug_memeditor.h"
 #include "gui_debug_constants.h"
@@ -28,8 +29,11 @@
 #include "config.h"
 #include "gui.h"
 #include "emu.h"
+#include "hotkeys.h"
 
 static MemEditor mem_edit[MEMORY_EDITOR_MAX];
+static_assert(config_memory_editor_count == MEMORY_EDITOR_MAX,
+    "Memory editor configuration count must match memory areas");
 static int mem_edit_select = -1;
 static int current_mem_edit = 0;
 static char set_value_buffer[5] = { };
@@ -38,6 +42,10 @@ static const int DEBUG_MEMORY_MAX_SETTINGS_RECORDS = 0x10000;
 static void memory_editor_menu(void);
 static void draw_tabs(void);
 static void draw_single_tab(int i);
+static bool adam_mapped_read(int address, u8* value, void* user_data);
+static bool adam_mapped_write(int address, u8 value, void* user_data);
+static bool adam_mapped_can_write(int address, void* user_data);
+static const char* adam_memory_source_name(Adam::MemorySource source);
 static bool memory_settings_read_data(std::istream& stream, void* data, size_t size);
 static bool memory_settings_read_count(std::istream& stream, int& count, size_t record_size);
 static bool memory_settings_read_editor(std::istream& stream, std::vector<MemEditor::Bookmark>& bookmarks,
@@ -46,7 +54,11 @@ static bool memory_settings_read_editor(std::istream& stream, std::vector<MemEdi
 void gui_debug_memory_init(void)
 {
     gui_debug_memory_reset();
+    gui_debug_memory_apply_settings();
+}
 
+void gui_debug_memory_apply_settings(void)
+{
     for (int i = 0; i < MEMORY_EDITOR_MAX; i++)
     {
         MemEditor::Options options;
@@ -78,14 +90,17 @@ void gui_debug_memory_reset(void)
     Memory* memory = core->GetMemory();
     Cartridge* cart = core->GetCartridge();
     Video* video = core->GetVideo();
+    Adam* adam = core->GetAdam();
 
     mem_edit[MEMORY_EDITOR_BIOS].Reset("BIOS", memory->GetBios(), 0x2000, 0x0000);
     mem_edit[MEMORY_EDITOR_RAM].Reset("RAM", memory->GetRam(), 0x0400, 0x6000);
     mem_edit[MEMORY_EDITOR_SGM_RAM].Reset("SGM RAM", memory->GetSGMRam(), 0x8000, 0x0000);
     mem_edit[MEMORY_EDITOR_VRAM].Reset("VRAM", video->GetVRAM(), 0x4000, 0x0000);
 
-    if (IsValidPointer(cart->GetROM()))
-        mem_edit[MEMORY_EDITOR_ROM].Reset("ROM", cart->GetROM(), cart->GetROMSize(), 0x0000);
+    mem_edit[MEMORY_EDITOR_ROM].Reset("ROM", cart->GetROM(), cart->GetROMSize(), 0x0000);
+
+    mem_edit[MEMORY_EDITOR_ADAM_MAPPED].Reset("CPU MAP", 0x10000, adam_mapped_read, adam_mapped_write, adam_mapped_can_write, adam);
+    mem_edit[MEMORY_EDITOR_ADAM_RAM].Reset("ADAM RAM", adam->GetMainRAM(), Adam::kMainRAMSize, 0x0000);
 }
 
 void gui_debug_window_memory(void)
@@ -93,7 +108,6 @@ void gui_debug_window_memory(void)
     for (int i = 0; i < MEMORY_EDITOR_MAX; i++)
     {
         mem_edit[i].SetGuiFont(gui_roboto_font);
-        mem_edit[i].WatchPopup();
         mem_edit[i].BookMarkPopup();
     }
 
@@ -106,16 +120,30 @@ void gui_debug_window_memory(void)
     memory_editor_menu();
 
     GearcolecoCore* core = emu_get_core();
-    Memory* memory = core->GetMemory();
-
     ImGui::PushFont(gui_default_font);
-    ImGui::TextColored(green, "  BANK: ");ImGui::SameLine();
-    ImGui::TextColored(cyan, "ROM");ImGui::SameLine();
-    ImGui::Text("$%02X", memory->GetRomBank());ImGui::SameLine();
-    ImGui::TextColored(cyan, "  SGM Upper");ImGui::SameLine();
-    ImGui::Text("%s", memory->IsSGMUpperEnabled() ? "ON" : "OFF");ImGui::SameLine();
-    ImGui::TextColored(cyan, "  SGM Lower");ImGui::SameLine();
-    ImGui::Text("%s", memory->IsSGMLowerEnabled() ? "ON" : "OFF");
+    if (core->GetMachine() == GC_MACHINE_ADAM)
+    {
+        Adam* adam = core->GetAdam();
+        ImGui::TextColored(green, "  MIOC: ");ImGui::SameLine();
+        ImGui::Text("$%02X", adam->GetMIOC());ImGui::SameLine();
+        ImGui::TextColored(cyan, "  CONTROL: ");ImGui::SameLine();
+        ImGui::Text("$%02X", adam->GetControl());ImGui::SameLine();
+        ImGui::TextColored(cyan, "  LOWER: ");ImGui::SameLine();
+        ImGui::Text("%s", adam_memory_source_name(adam->GetMemorySource(0x0000)));ImGui::SameLine();
+        ImGui::TextColored(cyan, "  UPPER: ");ImGui::SameLine();
+        ImGui::Text("%s", adam_memory_source_name(adam->GetMemorySource(0x8000)));
+    }
+    else
+    {
+        Memory* memory = core->GetMemory();
+        ImGui::TextColored(green, "  BANK: ");ImGui::SameLine();
+        ImGui::TextColored(cyan, "ROM");ImGui::SameLine();
+        ImGui::Text("$%02X", memory->GetRomBank());ImGui::SameLine();
+        ImGui::TextColored(cyan, "  SGM Upper");ImGui::SameLine();
+        ImGui::Text("%s", memory->IsSGMUpperEnabled() ? "ON" : "OFF");ImGui::SameLine();
+        ImGui::TextColored(cyan, "  SGM Lower");ImGui::SameLine();
+        ImGui::Text("%s", memory->IsSGMLowerEnabled() ? "ON" : "OFF");
+    }
     ImGui::PopFont();
 
     if (ImGui::BeginTabBar("##memory_tabs", ImGuiTabBarFlags_None))
@@ -145,6 +173,12 @@ void gui_debug_memory_find_bytes_window(void)
         ImGui::PushFont(gui_default_font);
         mem_edit[i].DrawFindBytesWindow();
         ImGui::PopFont();
+
+        if (mem_edit[i].ConsumeShowRequest())
+        {
+            config_debug.show_memory = true;
+            mem_edit_select = i;
+        }
     }
 }
 
@@ -152,6 +186,8 @@ void gui_debug_memory_watches_window(void)
 {
     for (int i = 0; i < MEMORY_EDITOR_MAX; i++)
     {
+        mem_edit[i].SetGuiFont(gui_roboto_font);
+        mem_edit[i].WatchPopup();
         ImGui::PushFont(gui_default_font);
         mem_edit[i].DrawWatchWindow();
         ImGui::PopFont();
@@ -183,6 +219,7 @@ void gui_debug_memory_select_all(void)
 
 void gui_debug_memory_goto(int editor, int address)
 {
+    config_debug.show_memory = true;
     mem_edit_select = editor;
     mem_edit[mem_edit_select].JumpToAddress(address);
 }
@@ -204,17 +241,25 @@ static void draw_tabs(void)
 {
     GearcolecoCore* core = emu_get_core();
     Cartridge* cart = core->GetCartridge();
-    Memory* memory = core->GetMemory();
-
-    if (memory->IsBiosLoaded())
-        draw_single_tab(MEMORY_EDITOR_BIOS);
-
-    draw_single_tab(MEMORY_EDITOR_RAM);
-    draw_single_tab(MEMORY_EDITOR_SGM_RAM);
-    draw_single_tab(MEMORY_EDITOR_VRAM);
-
-    if (IsValidPointer(cart->GetROM()))
-        draw_single_tab(MEMORY_EDITOR_ROM);
+    if (core->GetMachine() == GC_MACHINE_ADAM)
+    {
+        draw_single_tab(MEMORY_EDITOR_ADAM_MAPPED);
+        draw_single_tab(MEMORY_EDITOR_ADAM_RAM);
+        draw_single_tab(MEMORY_EDITOR_VRAM);
+        if (IsValidPointer(cart->GetROM()))
+            draw_single_tab(MEMORY_EDITOR_ROM);
+    }
+    else
+    {
+        Memory* memory = core->GetMemory();
+        if (memory->IsBiosLoaded())
+            draw_single_tab(MEMORY_EDITOR_BIOS);
+        draw_single_tab(MEMORY_EDITOR_RAM);
+        draw_single_tab(MEMORY_EDITOR_SGM_RAM);
+        draw_single_tab(MEMORY_EDITOR_VRAM);
+        if (IsValidPointer(cart->GetROM()))
+            draw_single_tab(MEMORY_EDITOR_ROM);
+    }
 }
 
 static void draw_single_tab(int i)
@@ -257,12 +302,12 @@ static void memory_editor_menu(void)
 
     if (ImGui::BeginMenu("Edit"))
     {
-        if (ImGui::MenuItem("Copy", "Ctrl+C"))
+        if (ImGui::MenuItem("Copy", HOTKEY_PRIMARY_LABEL "C"))
         {
             gui_debug_memory_copy();
         }
 
-        if (ImGui::MenuItem("Paste", "Ctrl+V"))
+        if (ImGui::MenuItem("Paste", HOTKEY_PRIMARY_LABEL "V"))
         {
             gui_debug_memory_paste();
         }
@@ -272,7 +317,7 @@ static void memory_editor_menu(void)
 
     if (ImGui::BeginMenu("Selection"))
     {
-        if (ImGui::MenuItem("Select All", "Ctrl+A"))
+        if (ImGui::MenuItem("Select All", HOTKEY_PRIMARY_LABEL "A"))
         {
             mem_edit[current_mem_edit].SelectAll();
         }
@@ -404,6 +449,7 @@ bool gui_debug_memory_select_range(int editor, int start_address, int end_addres
     if (!mem_edit[editor].SetSelection(start_address, end_address))
         return false;
 
+    config_debug.show_memory = true;
     mem_edit_select = editor;
     mem_edit[editor].ScrollToAddress(start_address);
 
@@ -472,14 +518,6 @@ bool gui_debug_memory_add_watch(int editor, int address, const char* notes, int 
     }
 
     return mem_edit[editor].AddWatchDirect(address, notes, size_index);
-}
-
-void gui_debug_memory_open_watch_popup(int editor, int address, const char* notes)
-{
-    if (editor < 0 || editor >= MEMORY_EDITOR_MAX)
-        return;
-
-    mem_edit[editor].PrepareAddWatch(address, notes);
 }
 
 void gui_debug_memory_remove_watch(int editor, int address)
@@ -575,25 +613,64 @@ void gui_debug_memory_save_settings(std::ostream& stream)
     }
 }
 
-bool gui_debug_memory_load_settings(std::istream& stream)
+bool gui_debug_memory_load_settings(std::istream& stream, int editor_count)
 {
     std::vector<MemEditor::Bookmark> bookmarks[MEMORY_EDITOR_MAX];
     std::vector<MemEditor::Watch> watches[MEMORY_EDITOR_MAX];
     u32 total_records = 0;
 
-    for (int i = 0; i < MEMORY_EDITOR_MAX; i++)
+    if ((editor_count < 0) || (editor_count > MEMORY_EDITOR_MAX))
+        return false;
+
+    for (int i = 0; i < editor_count; i++)
     {
         if (!memory_settings_read_editor(stream, bookmarks[i], watches[i], total_records))
             return false;
     }
 
-    for (int i = 0; i < MEMORY_EDITOR_MAX; i++)
+    for (int i = 0; i < editor_count; i++)
     {
         mem_edit[i].GetBookmarks()->swap(bookmarks[i]);
         mem_edit[i].GetWatches()->swap(watches[i]);
     }
 
     return true;
+}
+
+static bool adam_mapped_read(int address, u8* value, void* user_data)
+{
+    Adam* adam = static_cast<Adam*>(user_data);
+
+    if (!IsValidPointer(adam) || !IsValidPointer(value) || (address < 0) || (address > 0xFFFF))
+        return false;
+
+    *value = adam->DebugReadMemory((u16)address);
+    return true;
+}
+
+static bool adam_mapped_write(int address, u8 value, void* user_data)
+{
+    Adam* adam = static_cast<Adam*>(user_data);
+    return IsValidPointer(adam) && (address >= 0) && (address <= 0xFFFF) && adam->DebugWriteMemory((u16)address, value);
+}
+
+static bool adam_mapped_can_write(int address, void* user_data)
+{
+    Adam* adam = static_cast<Adam*>(user_data);
+    return IsValidPointer(adam) && (address >= 0) && (address <= 0xFFFF) && adam->CanWriteMemory((u16)address);
+}
+
+static const char* adam_memory_source_name(Adam::MemorySource source)
+{
+    switch (source)
+    {
+        case Adam::MemorySourceRAM: return "RAM";
+        case Adam::MemorySourceOS7: return "OS-7";
+        case Adam::MemorySourceEOS: return "EOS";
+        case Adam::MemorySourceSmartWriter: return "SMARTWRITER";
+        case Adam::MemorySourceCartridge: return "CARTRIDGE";
+        default: return "OPEN";
+    }
 }
 
 static bool memory_settings_read_data(std::istream& stream, void* data, size_t size)
@@ -606,6 +683,7 @@ static bool memory_settings_read_count(std::istream& stream, int& count, size_t 
 {
     if (!memory_settings_read_data(stream, &count, sizeof(count)))
         return false;
+
     if (count < 0 || count > DEBUG_MEMORY_MAX_SETTINGS_RECORDS || record_size == 0)
         return false;
 
@@ -638,6 +716,7 @@ static bool memory_settings_read_editor(std::istream& stream, std::vector<MemEdi
 
     total_records += (u32)bookmark_count;
     bookmarks.reserve((size_t)bookmark_count);
+
     for (int i = 0; i < bookmark_count; i++)
     {
         MemEditor::Bookmark item = {};
@@ -650,9 +729,9 @@ static bool memory_settings_read_editor(std::istream& stream, std::vector<MemEdi
     }
 
     MemEditor::Watch watch = {};
-    size_t watch_size = sizeof(watch.address) + sizeof(watch.notes) +
-        sizeof(watch.size) + sizeof(watch.format);
+    size_t watch_size = sizeof(watch.address) + sizeof(watch.notes) + sizeof(watch.size) + sizeof(watch.format);
     int watch_count = 0;
+
     if (!memory_settings_read_count(stream, watch_count, watch_size) ||
         (u32)watch_count > DEBUG_MEMORY_MAX_SETTINGS_RECORDS - total_records)
         return false;

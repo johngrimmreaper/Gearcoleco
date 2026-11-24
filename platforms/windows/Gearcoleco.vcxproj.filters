@@ -24,16 +24,25 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\src\Adam.cpp"><Filter>core</Filter></ClCompile>
+    <ClCompile Include="..\..\src\AdamMedia.cpp"><Filter>core</Filter></ClCompile>
+    <ClCompile Include="..\..\src\AdamNet.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\application.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\application_headless.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\config.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\display.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\emu.cpp"><Filter>desktop</Filter></ClCompile>
+    <ClCompile Include="..\shared\desktop\emu_adam.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\events.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\gamepad.cpp"><Filter>desktop</Filter></ClCompile>
+    <ClCompile Include="..\shared\desktop\game_focus.cpp"><Filter>desktop</Filter></ClCompile>
+    <ClCompile Include="..\shared\desktop\hotkeys.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\gui.cpp"><Filter>desktop</Filter></ClCompile>
+    <ClCompile Include="..\shared\desktop\gui_adam.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\gui_actions.cpp"><Filter>desktop</Filter></ClCompile>
+    <ClCompile Include="..\shared\desktop\gui_notifications.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\gui_debug.cpp"><Filter>desktop</Filter></ClCompile>
+    <ClCompile Include="..\shared\desktop\gui_debug_adam.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\gui_debug_ay8910.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\gui_debug_disassembler.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\gui_debug_memeditor.cpp"><Filter>desktop</Filter></ClCompile>
@@ -44,10 +53,12 @@
     <ClCompile Include="..\shared\desktop\gui_debug_tms9918.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\gui_debug_f18a.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\gui_debug_trace_logger.cpp"><Filter>desktop</Filter></ClCompile>
+    <ClCompile Include="..\shared\desktop\gui_debug_profiler.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\trace_logger_formatter.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\gui_filedialogs.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\gui_menus.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\gui_popups.cpp"><Filter>desktop</Filter></ClCompile>
+    <ClCompile Include="..\shared\desktop\gui_shader.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\main.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\ogl_renderer.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\ogl_shader_program.cpp"><Filter>desktop</Filter></ClCompile>
@@ -55,6 +66,7 @@
     <ClCompile Include="..\shared\desktop\shader_preset.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\rewind.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\runahead.cpp"><Filter>desktop</Filter></ClCompile>
+    <ClCompile Include="..\shared\desktop\video_recorder.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\single_instance.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\sound_queue.cpp"><Filter>desktop</Filter></ClCompile>
     <ClCompile Include="..\shared\desktop\mcp\mcp_debug_adapter.cpp"><Filter>desktop\mcp</Filter></ClCompile>
@@ -66,6 +78,9 @@
     <ClCompile Include="..\..\src\ColecoVisionIOPorts.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="..\..\src\GearcolecoCore.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="..\..\src\Input.cpp"><Filter>core</Filter></ClCompile>
+    <ClCompile Include="..\..\src\KeyMap.cpp"><Filter>core</Filter></ClCompile>
+    <ClCompile Include="..\..\src\KeyMapper.cpp"><Filter>core</Filter></ClCompile>
+    <ClCompile Include="..\..\src\OsdCanvas.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="..\..\src\Mapper.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="..\..\src\Memory.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="..\..\src\opcodes.cpp"><Filter>core</Filter></ClCompile>
@@ -73,6 +88,7 @@
     <ClCompile Include="..\..\src\opcodes_ed.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="..\..\src\Processor.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="..\..\src\TraceLogger.cpp"><Filter>core</Filter></ClCompile>
+    <ClCompile Include="..\..\src\Profiler.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="..\..\src\VgmRecorder.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="..\..\src\TMS9918A.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="..\..\src\F18A.cpp"><Filter>core</Filter></ClCompile>
@@ -95,6 +111,9 @@
     <ClCompile Include="..\shared\dependencies\imgui\implot_items.cpp"><Filter>dependencies\imgui</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\src\Adam.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="..\..\src\AdamMedia.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="..\..\src\AdamNet.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\application.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\application_headless.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\backers.h"><Filter>desktop</Filter></ClInclude>
@@ -105,12 +124,19 @@
     <ClInclude Include="..\shared\desktop\console_utils.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\display.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\emu.h"><Filter>desktop</Filter></ClInclude>
+    <ClInclude Include="..\shared\desktop\emu_adam.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\events.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gamepad.h"><Filter>desktop</Filter></ClInclude>
+    <ClInclude Include="..\shared\desktop\game_focus.h"><Filter>desktop</Filter></ClInclude>
+    <ClInclude Include="..\shared\desktop\hotkeys.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui_actions.h"><Filter>desktop</Filter></ClInclude>
+    <ClInclude Include="..\shared\desktop\gui_notifications.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui_debug.h"><Filter>desktop</Filter></ClInclude>
+    <ClInclude Include="..\shared\desktop\gui_adam.h"><Filter>desktop</Filter></ClInclude>
+    <ClInclude Include="..\shared\desktop\gui_debug_adam.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui_debug_ay8910.h"><Filter>desktop</Filter></ClInclude>
+    <ClInclude Include="..\shared\desktop\gui_colors.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui_debug_constants.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui_debug_disassembler.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui_debug_memeditor.h"><Filter>desktop</Filter></ClInclude>
@@ -122,11 +148,13 @@
     <ClInclude Include="..\shared\desktop\gui_debug_tms9918.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui_debug_f18a.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui_debug_trace_logger.h"><Filter>desktop</Filter></ClInclude>
+    <ClInclude Include="..\shared\desktop\gui_debug_profiler.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\trace_logger_formatter.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui_debug_widgets.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui_filedialogs.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui_menus.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\gui_popups.h"><Filter>desktop</Filter></ClInclude>
+    <ClInclude Include="..\shared\desktop\gui_shader.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\..\src\ips_patch.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\keyboard.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\license.h"><Filter>desktop</Filter></ClInclude>
@@ -136,6 +164,7 @@
     <ClInclude Include="..\shared\desktop\shader_preset.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\rewind.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\runahead.h"><Filter>desktop</Filter></ClInclude>
+    <ClInclude Include="..\shared\desktop\video_recorder.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\single_instance.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\sound_queue.h"><Filter>desktop</Filter></ClInclude>
     <ClInclude Include="..\shared\desktop\utils.h"><Filter>desktop</Filter></ClInclude>
@@ -154,6 +183,13 @@
     <ClInclude Include="..\..\src\gearcoleco.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\..\src\GearcolecoCore.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\..\src\Input.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="..\..\src\AdamKeys.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="..\..\src\AdamKeyMapperLayout.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="..\..\src\HostKeys.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="..\..\src\KeyMap.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="..\..\src\KeyMapper.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="..\..\src\OsdCanvas.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="..\..\src\OsdFont.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\..\src\IOPorts.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\..\src\log.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\..\src\Mapper.h"><Filter>core</Filter></ClInclude>
@@ -175,6 +211,7 @@
     <ClInclude Include="..\..\src\opcodefdcb_names.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\..\src\opcodexx_names.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\..\src\Processor.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="..\..\src\Profiler.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\..\src\Processor_inline.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\..\src\SixteenBitRegister.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="..\..\src\StandardMapper.h"><Filter>core</Filter></ClInclude>
@@ -222,5 +259,6 @@
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Gearcoleco.rc" />
+    <ResourceCompile Include="version.rc" />
   </ItemGroup>
 </Project>

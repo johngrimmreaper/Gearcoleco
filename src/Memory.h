@@ -30,6 +30,7 @@ class Random;
 class Mapper;
 class StandardMapper;
 class TraceLogger;
+class Adam;
 
 class Memory
 {
@@ -37,6 +38,7 @@ public:
     Memory(Cartridge* pCartridge, Random* pRandom);
     ~Memory();
     void SetProcessor(Processor* pProcessor);
+    void SetAdam(Adam* adam);
     void SetTraceLogger(TraceLogger* pTraceLogger);
     void Init();
     void Reset();
@@ -51,7 +53,7 @@ public:
     void LoadBios(const char* szFilePath);
     bool LoadBiosFromBuffer(const u8* buffer, int size);
     void UnloadBios();
-    bool IsBiosLoaded();
+    bool IsBiosLoaded() const;
     void SaveState(std::ostream& stream);
     void LoadState(std::istream& stream);
     void ResetRomDisassembledMemory();
@@ -64,7 +66,9 @@ public:
     GC_Disassembler_Record** GetDisassemblerRamMap();
     GC_Disassembler_Record** GetDisassemblerBiosMap();
     GC_Disassembler_Record** GetDisassemblerSGMRamMap();
+    GC_Disassembler_Record** GetDisassemblerAdamMap();
     u32 GetPhysicalAddress(u16 address);
+    u32 GetCartridgeROMOffset(u16 address);
     u8 GetBank(u16 address);
     bool IsSGMUpperEnabled() { return m_bSGMUpper; }
     bool IsSGMLowerEnabled() { return m_bSGMLower; }
@@ -75,16 +79,27 @@ public:
     u64 GetTotalCycles() const { return m_iTotalCycles; }
 
 private:
+    void SyncAdamDisassemblerMap();
+    NO_INLINE GC_Disassembler_Record* GetOrCreateAdamDisassemblerRecord(u16 address);
+    GC_Disassembler_Record* GetAdamDisassemblerRecord(u16 address, u8 bank);
+    GC_Disassembler_Record* GetOrCreateDisassemblerRecord(GC_Disassembler_Record** map,
+        int offset, int bank);
+
+private:
     Processor* m_pProcessor;
     Cartridge* m_pCartridge;
     Random* m_pRandom;
     Mapper* m_pMapper;
     StandardMapper* m_pStandardMapper;
     TraceLogger* m_pTraceLogger;
+    Adam* m_pAdam;
     GC_Disassembler_Record** m_pDisassembledRomMap;
     GC_Disassembler_Record** m_pDisassembledRamMap;
     GC_Disassembler_Record** m_pDisassembledBiosMap;
     GC_Disassembler_Record** m_pDisassembledSGMRamMap;
+    GC_Disassembler_Record** m_pDisassembledAdamMap;
+    u32* m_pDisassembledAdamGeneration;
+    u32 m_AdamDisassemblerGeneration;
     bool m_bBiosLoaded;
     bool m_bSGMUpper;
     bool m_bSGMLower;

@@ -24,12 +24,17 @@
 #include "Cartridge.h"
 #include "Mapper.h"
 #include "StandardMapper.h"
+#include "Adam.h"
 
 inline u8 Memory::Read(u16 address)
 {
     #ifndef GEARCOLECO_DISABLE_DISASSEMBLER
-    m_pProcessor->CheckMemoryBreakpoints(Processor::GC_BREAKPOINT_TYPE_ROMRAM, address, true);
+    if (m_pProcessor->HasMemoryHooks(true))
+        m_pProcessor->CheckCpuAddressHooks(address, true);
     #endif
+
+    if (unlikely(IsValidPointer(m_pAdam)))
+        return m_pAdam->ReadMemory(address);
 
     switch (address & 0xE000)
     {
@@ -62,6 +67,9 @@ inline u8 Memory::Read(u16 address)
 
 inline u8 Memory::DebugRetrieve(u16 address)
 {
+    if (unlikely(IsValidPointer(m_pAdam)))
+        return m_pAdam->DebugReadMemory(address);
+
     switch (address & 0xE000)
     {
         case 0x0000:
@@ -84,8 +92,15 @@ inline u8 Memory::DebugRetrieve(u16 address)
 inline void Memory::Write(u16 address, u8 value)
 {
     #ifndef GEARCOLECO_DISABLE_DISASSEMBLER
-    m_pProcessor->CheckMemoryBreakpoints(Processor::GC_BREAKPOINT_TYPE_ROMRAM, address, false);
+    if (m_pProcessor->HasMemoryHooks(false))
+        m_pProcessor->CheckCpuAddressHooks(address, false);
     #endif
+
+    if (unlikely(IsValidPointer(m_pAdam)))
+    {
+        m_pAdam->WriteMemory(address, value);
+        return;
+    }
 
     switch (address & 0xE000)
     {
@@ -148,6 +163,9 @@ inline GC_Disassembler_Record* Memory::GetDisassemblerRecord(u16 address, u8 ban
 {
 #ifndef GEARCOLECO_DISABLE_DISASSEMBLER
 
+    if (IsValidPointer(m_pAdam) && m_pAdam->IsEnabled())
+        return GetDisassemblerRecord(address);
+
     if (address < 0x8000)
         return GetDisassemblerRecord(address);
 
@@ -166,6 +184,9 @@ inline GC_Disassembler_Record* Memory::GetDisassemblerRecord(u16 address, u8 ban
 
 inline u32 Memory::GetTracePhysicalAddress(u16 address, u8 bank)
 {
+    if (IsValidPointer(m_pAdam) && m_pAdam->IsEnabled())
+        return address;
+
     if (address < 0x8000)
         return address;
 

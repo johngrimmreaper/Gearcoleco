@@ -1,8 +1,9 @@
-; CRT Lottes + Ghosting preset for Geargrafx.
+; CRT Lottes + Ghosting preset for Gearcoleco.
 ; Includes the public domain CRT styled scan-line shader by Timothy Lottes.
 
 [Preset]
 Name=CRT Lottes + Ghosting
+Group=CRT Lottes
 Passes=2
 
 [Pass0]

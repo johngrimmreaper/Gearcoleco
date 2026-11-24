@@ -30,82 +30,13 @@
     #define EXTERN extern
 #endif
 
-enum gui_ShortCutEvent
-{
-    gui_ShortcutOpenROM = 0,
-    gui_ShortcutReloadROM,
-    gui_ShortcutReset,
-    gui_ShortcutPause,
-    gui_ShortcutFFWD,
-    gui_ShortcutMute,
-    gui_ShortcutSaveState,
-    gui_ShortcutLoadState,
-    gui_ShortcutSelectSlot1,
-    gui_ShortcutSelectSlot2,
-    gui_ShortcutSelectSlot3,
-    gui_ShortcutSelectSlot4,
-    gui_ShortcutSelectSlot5,
-    gui_ShortcutScreenshot,
-    gui_ShortcutFullscreen,
-    gui_ShortcutCaptureMouse,
-    gui_ShortcutDebugStepOver,
-    gui_ShortcutDebugStepInto,
-    gui_ShortcutDebugStepOut,
-    gui_ShortcutDebugStepFrame,
-    gui_ShortcutDebugBreak,
-    gui_ShortcutDebugContinue,
-    gui_ShortcutDebugRuntocursor,
-    gui_ShortcutDebugGoBack,
-    gui_ShortcutDebugBreakpoint,
-    gui_ShortcutDebugCopy,
-    gui_ShortcutDebugPaste,
-    gui_ShortcutDebugSelectAll,
-    gui_ShortcutShowMainMenu
-};
-
-struct gui_HotkeyMapping
-{
-    gui_ShortCutEvent shortcut;
-    int config_index;
-    bool allow_repeat;
-};
-
-#define GUI_HOTKEY_MAP_COUNT 26
-
-const gui_HotkeyMapping gui_hotkey_map[GUI_HOTKEY_MAP_COUNT] = {
-    {gui_ShortcutOpenROM, config_HotkeyIndex_OpenROM, false},
-    {gui_ShortcutReloadROM, config_HotkeyIndex_ReloadROM, false},
-    {gui_ShortcutReset, config_HotkeyIndex_Reset, false},
-    {gui_ShortcutPause, config_HotkeyIndex_Pause, false},
-    {gui_ShortcutFFWD, config_HotkeyIndex_FFWD, false},
-    {gui_ShortcutMute, config_HotkeyIndex_Mute, false},
-    {gui_ShortcutSaveState, config_HotkeyIndex_SaveState, false},
-    {gui_ShortcutLoadState, config_HotkeyIndex_LoadState, false},
-    {gui_ShortcutSelectSlot1, config_HotkeyIndex_SelectSlot1, false},
-    {gui_ShortcutSelectSlot2, config_HotkeyIndex_SelectSlot2, false},
-    {gui_ShortcutSelectSlot3, config_HotkeyIndex_SelectSlot3, false},
-    {gui_ShortcutSelectSlot4, config_HotkeyIndex_SelectSlot4, false},
-    {gui_ShortcutSelectSlot5, config_HotkeyIndex_SelectSlot5, false},
-    {gui_ShortcutScreenshot, config_HotkeyIndex_Screenshot, false},
-    {gui_ShortcutFullscreen, config_HotkeyIndex_Fullscreen, false},
-    {gui_ShortcutCaptureMouse, config_HotkeyIndex_CaptureMouse, false},
-    {gui_ShortcutShowMainMenu, config_HotkeyIndex_ShowMainMenu, false},
-    {gui_ShortcutDebugStepInto, config_HotkeyIndex_DebugStepInto, true},
-    {gui_ShortcutDebugStepOver, config_HotkeyIndex_DebugStepOver, true},
-    {gui_ShortcutDebugStepOut, config_HotkeyIndex_DebugStepOut, true},
-    {gui_ShortcutDebugStepFrame, config_HotkeyIndex_DebugStepFrame, true},
-    {gui_ShortcutDebugContinue, config_HotkeyIndex_DebugContinue, true},
-    {gui_ShortcutDebugBreak, config_HotkeyIndex_DebugBreak, true},
-    {gui_ShortcutDebugRuntocursor, config_HotkeyIndex_DebugRunToCursor, false},
-    {gui_ShortcutDebugBreakpoint, config_HotkeyIndex_DebugBreakpoint, false},
-    {gui_ShortcutDebugGoBack, config_HotkeyIndex_DebugGoBack, false},
-};
-
 EXTERN bool gui_in_use;
 EXTERN bool gui_main_window_hovered;
+EXTERN bool gui_main_window_focused;
+EXTERN SDL_WindowID gui_main_window_sdl_window_id;
 EXTERN bool gui_main_menu_hovered;
 EXTERN ImFont* gui_default_font;
-EXTERN ImFont* gui_default_fonts[4];
+EXTERN ImFont* gui_default_fonts[2][4];
 EXTERN ImFont* gui_roboto_font;
 EXTERN ImFont* gui_material_icons_font;
 EXTERN int gui_main_window_width;
@@ -120,16 +51,24 @@ EXTERN bool gui_shortcut_open_rom;
 EXTERN ImVec4 gui_custom_palette[16];
 
 EXTERN bool gui_init(void);
+EXTERN void gui_apply_settings(void);
 EXTERN void gui_destroy(void);
 EXTERN void gui_render(void);
-EXTERN void gui_shortcut(gui_ShortCutEvent event);
+EXTERN void gui_hotkey(config_HotkeyIndex hotkey, bool pressed);
 EXTERN bool gui_load_rom(const char* path, const char* symbol_path = NULL);
+EXTERN bool gui_is_cartridge_file(const char* path);
+EXTERN bool gui_open_rom(const char* path, bool adam_cartridge = false);
+EXTERN void gui_drop_media(const char* path);
+EXTERN bool gui_start_adam(const char* const* media_paths = NULL);
 EXTERN bool gui_is_rom_loading(void);
 EXTERN bool gui_finish_loading_rom(void);
+EXTERN void gui_load_state_after_media(int slot, const char* path);
 EXTERN Cartridge::ForceConfiguration gui_get_force_configuration(void);
 EXTERN void gui_set_style(void);
-EXTERN void gui_set_status_message(const char* message, Uint64 milliseconds);
 EXTERN void gui_set_error_message(const char* message);
+EXTERN void gui_center_next_window(void);
+EXTERN ImVec2 gui_snap_to_physical_pixel(const ImVec2& pos);
+EXTERN bool gui_has_open_window(void);
 EXTERN void gui_update_palette(void);
 
 #undef GUI_IMPORT

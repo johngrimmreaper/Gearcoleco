@@ -31,6 +31,7 @@
 #include "Video.h"
 #if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
 #include "TraceLogger.h"
+#include "Profiler.h"
 #endif
 
 #endif	/* GEARCOLECO_H */

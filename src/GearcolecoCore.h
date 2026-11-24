@@ -33,6 +33,11 @@ class Input;
 class ColecoVisionIOPorts;
 class Random;
 class TraceLogger;
+class Profiler;
+class Adam;
+class AdamMedia;
+class KeyMap;
+class KeyMapper;
 
 class GearcolecoCore
 {
@@ -52,8 +57,33 @@ public:
     void Init(GC_Color_Format pixelFormat = GC_PIXEL_RGBA8888);
     bool RunToVBlank(u8* pFrameBuffer, s16* pSampleBuffer, int* pSampleCount, GC_Debug_Run* debug = NULL, bool render = true);
     bool LoadROM(const char* szFilePath, Cartridge::ForceConfiguration* config = NULL, bool softpatching = false);
-    bool LoadROMFromBuffer(const u8* buffer, int size, Cartridge::ForceConfiguration* config = NULL);
-    void SaveDisassembledROM();
+    bool LoadROMFromBuffer(const u8* buffer, int size, Cartridge::ForceConfiguration* config = NULL,
+        const char* path = NULL, bool softpatching = false);
+    bool LoadAdamFirmware(const u8* os7, int os7_size, const u8* eos, int eos_size,
+        const u8* smartwriter, int smartwriter_size);
+    bool LoadAdamFirmware(GC_AdamFirmware firmware, const u8* data, int size);
+    void UnloadAdamFirmware();
+    void SetAdamRegion(Cartridge::CartridgeRegions region);
+    bool StartAdam(GC_AdamBootMode boot_mode = GC_ADAM_BOOT_COMPUTER);
+    void PowerOffAdam();
+    bool LoadAdamMediaFromBuffer(GC_AdamMediaSlot slot, GC_AdamMediaType type,
+        const u8* data, size_t size, bool write_protected = false, u32 base_crc = 0);
+    void EjectAdamMedia(GC_AdamMediaSlot slot);
+    void EjectAllAdamMedia();
+    void UnloadContent();
+    AdamMedia* GetAdamMedia(GC_AdamMediaSlot slot);
+    void AdamKeyPressed(GC_AdamKey key);
+    void AdamKeyReleased(GC_AdamKey key);
+    void AdamReleaseAllKeys();
+    void HostKeyPressed(u16 usage);
+    void HostKeyReleased(u16 usage);
+    void ReleaseAllHostKeys();
+    void DiscardDeferredHostKeys();
+    void EnableHostHotkeys(bool enable);
+    bool IsReady() const;
+    GC_Machine GetMachine() const;
+    GC_ContentType GetContentType() const;
+    GC_AdamBootMode GetAdamBootMode() const;
     bool GetRuntimeInfo(GC_RuntimeInfo& runtime_info);
     void KeyPressed(GC_Controllers controller, GC_Keys key);
     void KeyReleased(GC_Controllers controller, GC_Keys key);
@@ -61,9 +91,9 @@ public:
     void Spinner2(int movement);
     void Pause(bool paused);
     bool IsPaused();
+    void ResetAdamComputer();
     void ResetROM(Cartridge::ForceConfiguration* config = NULL);
     void ResetROMPreservingRAM(Cartridge::ForceConfiguration* config = NULL);
-    void ResetSound();
     void SaveRam();
     void SaveRam(const char* szPath, bool fullPath = false);
     void LoadRam();
@@ -72,6 +102,7 @@ public:
     bool SaveState(u8* buffer, size_t& size, bool screenshot = false);
     bool LoadState(const char* path = NULL, int index = -1);
     bool LoadState(const u8* buffer, size_t size);
+    size_t GetLibretroSaveStateSize() const;
     bool GetSaveStateHeader(int index, const char* path, GC_SaveState_Header* header);
     bool GetSaveStateScreenshot(int index, const char* path, GC_SaveState_Screenshot* screenshot);
     Memory* GetMemory();
@@ -83,16 +114,26 @@ public:
     GC_VideoChip GetVideoChip() const;
     Input* GetInput();
     TraceLogger* GetTraceLogger();
+    Profiler* GetProfiler();
+    Adam* GetAdam();
+    KeyMap* GetKeyMap();
+    KeyMapper* GetKeyMapper();
     u64 GetMasterClockCycles();
+    bool GetAdamDebugState(GC_AdamDebugState* state);
     void RenderFrameBuffer(u8* finalFrameBuffer);
+    void RenderIndexFrame(u8* finalIndexBuffer);
 
 private:
-    void Reset();
+    static bool IsValidStateScreenshot(const GC_SaveState_Header& header, size_t file_size);
+    static bool IsValidStateIdentity(u8 machine, u8 content_type, u8 adam_boot_mode);
+    void Reset(bool cold = true, bool video_changed = false);
     void SelectVideoChip(GC_VideoChip video_chip);
     void SelectVideoChipForCartridge();
     bool SaveState(std::ostream& stream, size_t& size, bool screenshot);
-    bool LoadState(std::istream& stream);
+    bool LoadStateTransactional(std::istream& stream);
+    bool LoadStateInternal(std::istream& stream);
     std::string GetSaveStatePath(const char* path, int index);
+    static void KeyMapCallback(void* core, GC_AdamKey key, bool pressed);
 
 private:
     Memory* m_pMemory;
@@ -106,12 +147,23 @@ private:
     ColecoVisionIOPorts* m_pColecoVisionIOPorts;
     Random* m_pRandom;
     TraceLogger* m_pTraceLogger;
+    Profiler* m_pProfiler;
+    Adam* m_pAdam;
+    KeyMap* m_pKeyMap;
+    KeyMapper* m_pKeyMapper;
+    u8* m_pStateBackup;
+    size_t m_StateBackupCapacity;
     bool m_bPaused;
+    bool m_bHostHotkeys;
     GC_Color_Format m_pixelFormat;
     u8* m_pFrameBuffer;
     u64 m_MasterClockCycles;
     GC_VideoChip m_requested_video_chip;
     GC_VideoChip m_video_chip;
+    GC_Machine m_machine;
+    GC_ContentType m_content_type;
+    GC_AdamBootMode m_adam_boot_mode;
+    Cartridge::CartridgeRegions m_adam_region;
 };
 
 #endif	/* CORE_H */

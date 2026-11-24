@@ -20,6 +20,8 @@
 #ifndef GUI_POPUPS_H
 #define GUI_POPUPS_H
 
+#include "imgui.h"
+
 #ifdef GUI_POPUPS_IMPORT
     #define EXTERN
 #else
@@ -31,9 +33,8 @@ EXTERN void gui_popup_modal_gamepad(int pad);
 EXTERN void gui_popup_modal_hotkey();
 EXTERN void gui_popup_modal_about(void);
 EXTERN void gui_popup_modal_load_defaults(void);
-EXTERN void gui_popup_modal_bios(void);
 EXTERN void gui_show_info(void);
-EXTERN void gui_show_fps(void);
+EXTERN void gui_show_fps(const ImVec2& min, const ImVec2& max);
 
 #undef GUI_POPUPS_IMPORT
 #undef EXTERN

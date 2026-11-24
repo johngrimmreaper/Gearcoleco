@@ -59,13 +59,16 @@ void gui_debug_window_tms9918a_nametable(void)
     u8* regs = video->GetRegisters();
     u8* vram = video->GetVRAM();
     int mode = video->GetMode();
+    bool text_mode = (mode & 0x01) != 0;
+    bool bogus_mode = (mode == 5) || (mode == 7);
+    bool region_mode = (mode == 2) || (mode == 3) || (mode == 6);
 
     bool window_hovered = ImGui::IsWindowHovered();
     static bool show_grid = true;
     int lines = 24;
-    int cols = (mode == 1) ? 40 : 32;
+    int cols = text_mode ? 40 : 32;
     float scale = 1.5f;
-    float tile_width = (mode == 1) ? 6.0f : 8.0f;
+    float tile_width = text_mode ? 6.0f : 8.0f;
     float size_h = tile_width * cols * scale;
     float size_v = 8.0f * lines * scale;
     float spacing_h = tile_width * scale;
@@ -93,14 +96,14 @@ void gui_debug_window_tms9918a_nametable(void)
         float x = p.x;
         for (int n = 0; n <= cols; n++)
         {
-            draw_list->AddLine(ImVec2(x, p.y), ImVec2(x, p.y + size_v), ImColor(dark_gray), 1.0f);
+            draw_list->AddLineV(x, p.y, p.y + size_v, ImColor(dark_gray), 1.0f);
             x += spacing_h;
         }
 
         float y = p.y;
         for (int n = 0; n <= lines; n++)
         {
-            draw_list->AddLine(ImVec2(p.x, y), ImVec2(p.x + size_h, y), ImColor(dark_gray), 1.0f);
+            draw_list->AddLineH(p.x, p.x + size_h, y, ImColor(dark_gray), 1.0f);
             y += spacing_v;
         }
     }
@@ -128,30 +131,37 @@ void gui_debug_window_tms9918a_nametable(void)
                 selected_bg_tile_x = hovered_bg_tile_x;
                 selected_bg_tile_y = hovered_bg_tile_y;
 
-                int name_table_addr = regs[2] << 10;
-                int pattern_table_addr = regs[4] << 11;
-                int region = (hovered_bg_tile_y & 0x18) << 5;
-                int tile_number = (hovered_bg_tile_y * cols) + hovered_bg_tile_x;
-                int name_tile_addr = (name_table_addr + tile_number) & 0x3FFF;
-                int name_tile = vram[name_tile_addr];
-                if (mode == 2 || mode == 4)
-                    pattern_table_addr &= 0x2000;
-                if (mode == 2)
-                    name_tile += region;
-                int goto_addr = (pattern_table_addr + (name_tile << 3)) & 0x3FFF;
-                gui_debug_memory_goto(MEMORY_EDITOR_VRAM, goto_addr);
+                if (!bogus_mode)
+                {
+                    int name_table_addr = regs[2] << 10;
+                    int pattern_table_addr = regs[4] << 11;
+                    int region_mask = ((regs[4] & 0x03) << 8) | 0xFF;
+                    int region = (hovered_bg_tile_y & 0x18) << 5;
+                    int tile_number = (hovered_bg_tile_y * cols) + hovered_bg_tile_x;
+                    int name_tile_addr = (name_table_addr + tile_number) & 0x3FFF;
+                    int name_tile = vram[name_tile_addr];
+
+                    if (region_mode)
+                    {
+                        pattern_table_addr &= 0x2000;
+                        name_tile = (name_tile + region) & region_mask;
+                    }
+
+                    int goto_addr = (pattern_table_addr + (name_tile << 3)) & 0x3FFF;
+                    gui_debug_memory_goto(MEMORY_EDITOR_VRAM, goto_addr);
+                }
             }
         }
 
         if (!(hovered_bg_tile_x == selected_bg_tile_x && hovered_bg_tile_y == selected_bg_tile_y))
-            draw_list->AddRect(ImVec2(p.x + (hovered_bg_tile_x * spacing_h), p.y + (hovered_bg_tile_y * spacing_v)), ImVec2(p.x + ((hovered_bg_tile_x + 1) * spacing_h), p.y + ((hovered_bg_tile_y + 1) * spacing_v)), ImColor(cyan), 2.0f, ImDrawFlags_RoundCornersAll, 2.0f);
+            draw_list->AddRect(ImVec2(p.x + (hovered_bg_tile_x * spacing_h), p.y + (hovered_bg_tile_y * spacing_v)), ImVec2(p.x + ((hovered_bg_tile_x + 1) * spacing_h), p.y + ((hovered_bg_tile_y + 1) * spacing_v)), ImColor(cyan), 2.0f, 2.0f, ImDrawFlags_StrokeCenterBiased);
     }
 
     if (selected_bg_tile_x >= 0 && selected_bg_tile_y >= 0)
     {
         float t = (float)(0.5 + 0.5 * sin(ImGui::GetTime() * 4.0));
-        ImVec4 pulse_color = gui_debug_lerp_color(red, white, t);
-        draw_list->AddRect(ImVec2(p.x + (selected_bg_tile_x * spacing_h), p.y + (selected_bg_tile_y * spacing_v)), ImVec2(p.x + ((selected_bg_tile_x + 1) * spacing_h), p.y + ((selected_bg_tile_y + 1) * spacing_v)), ImColor(pulse_color), 2.0f, ImDrawFlags_RoundCornersAll, 2.0f);
+        ImVec4 pulse_color = gui_lerp_color(red, white, t);
+        draw_list->AddRect(ImVec2(p.x + (selected_bg_tile_x * spacing_h), p.y + (selected_bg_tile_y * spacing_v)), ImVec2(p.x + ((selected_bg_tile_x + 1) * spacing_h), p.y + ((selected_bg_tile_y + 1) * spacing_v)), ImColor(pulse_color), 2.0f, 2.0f, ImDrawFlags_StrokeCenterBiased);
     }
 
     int tile_x = (hovered_bg_tile_x >= 0) ? hovered_bg_tile_x : selected_bg_tile_x;
@@ -170,46 +180,49 @@ void gui_debug_window_tms9918a_nametable(void)
         ImGui::TextColored(cyan, "   Y:"); ImGui::SameLine();
         ImGui::Text("$%02X", tile_y);
 
-        int name_table_addr = regs[2] << 10;
-        int color_table_addr = regs[3] << 6;
-        if (mode == 2)
-            color_table_addr &= 0x2000;
-        int pattern_table_addr = regs[4] << 11;
-        int region = (tile_y & 0x18) << 5;
-
-        int tile_number = (tile_y * cols) + tile_x;
-        int name_tile_addr = (name_table_addr + tile_number) & 0x3FFF;
-        int name_tile = vram[name_tile_addr];
-
-        if (mode == 2)
+        if (bogus_mode)
         {
-            pattern_table_addr &= 0x2000;
-            name_tile += region;
+            ImGui::TextColored(gray, " Fixed output; VRAM tables unused");
         }
-        else if (mode == 4)
+        else
         {
-            pattern_table_addr &= 0x2000;
+            int name_table_addr = regs[2] << 10;
+            int color_table_addr = regs[3] << 6;
+            if (mode == 2)
+                color_table_addr &= 0x2000;
+            int pattern_table_addr = regs[4] << 11;
+            int region_mask = ((regs[4] & 0x03) << 8) | 0xFF;
+            int region = (tile_y & 0x18) << 5;
+
+            int tile_number = (tile_y * cols) + tile_x;
+            int name_tile_addr = (name_table_addr + tile_number) & 0x3FFF;
+            int name_tile = vram[name_tile_addr];
+
+            if (region_mode)
+            {
+                pattern_table_addr &= 0x2000;
+                name_tile = (name_tile + region) & region_mask;
+            }
+            int tile_addr = (pattern_table_addr + (name_tile << 3)) & 0x3FFF;
+
+            int color_mask = ((regs[3] & 0x7F) << 3) | 0x07;
+
+            int color_tile_addr = 0;
+
+            if (mode == 2)
+                color_tile_addr = color_table_addr + ((name_tile & color_mask) << 3);
+            else if (mode == 0)
+                color_tile_addr = color_table_addr + (name_tile >> 3);
+
+            ImGui::TextColored(cyan, " Name Addr:"); ImGui::SameLine();
+            ImGui::Text(" $%04X", name_tile_addr);
+            ImGui::TextColored(cyan, " Tile Number:"); ImGui::SameLine();
+            ImGui::Text("$%03X", name_tile);
+            ImGui::TextColored(cyan, " Tile Addr:"); ImGui::SameLine();
+            ImGui::Text(" $%04X", tile_addr);
+            ImGui::TextColored(cyan, " Color Addr:"); ImGui::SameLine();
+            ImGui::Text("$%04X", color_tile_addr);
         }
-
-        int tile_addr = (pattern_table_addr + (name_tile << 3)) & 0x3FFF;
-
-        int color_mask = ((regs[3] & 0x7F) << 3) | 0x07;
-
-        int color_tile_addr = 0;
-
-        if (mode == 2)
-            color_tile_addr = color_table_addr + ((name_tile & color_mask) << 3);
-        else if (mode == 0)
-            color_tile_addr = color_table_addr + (name_tile >> 3);
-
-        ImGui::TextColored(cyan, " Name Addr:"); ImGui::SameLine();
-        ImGui::Text(" $%04X", name_tile_addr);
-        ImGui::TextColored(cyan, " Tile Number:"); ImGui::SameLine();
-        ImGui::Text("$%03X", name_tile);
-        ImGui::TextColored(cyan, " Tile Addr:"); ImGui::SameLine();
-        ImGui::Text(" $%04X", tile_addr);
-        ImGui::TextColored(cyan, " Color Addr:"); ImGui::SameLine();
-        ImGui::Text("$%04X", color_tile_addr);
     }
 
     ImGui::Columns(1);
@@ -244,9 +257,9 @@ void gui_debug_window_tms9918a_patterns(void)
 
     bool window_hovered = ImGui::IsWindowHovered();
     static bool show_grid = true;
-    bool split_mode2 = (mode == 2);
-    int section_count = split_mode2 ? 3 : 1;
-    int lines_per_section = split_mode2 ? 8 : 32;
+    bool split_pattern_table = (mode == 2) || (mode == 3) || (mode == 6);
+    int section_count = split_pattern_table ? 3 : 1;
+    int lines_per_section = split_pattern_table ? 8 : 32;
     int visible_lines = section_count * lines_per_section;
     float scale = 1.5f;
     float width = 8.0f * 32.0f * scale;
@@ -289,14 +302,14 @@ void gui_debug_window_tms9918a_patterns(void)
             float x = p_tiles.x;
             for (int grid_col = 0; grid_col <= 32; grid_col++)
             {
-                draw_list->AddLine(ImVec2(x, p_tiles.y), ImVec2(x, p_tiles.y + section_height), ImColor(dark_gray), 1.0f);
+                draw_list->AddLineV(x, p_tiles.y, p_tiles.y + section_height, ImColor(dark_gray), 1.0f);
                 x += spacing;
             }
 
             float y = p_tiles.y;
             for (int grid_row = 0; grid_row <= lines_per_section; grid_row++)
             {
-                draw_list->AddLine(ImVec2(p_tiles.x, y), ImVec2(p_tiles.x + width, y), ImColor(dark_gray), 1.0f);
+                draw_list->AddLineH(p_tiles.x, p_tiles.x + width, y, ImColor(dark_gray), 1.0f);
                 y += spacing;
             }
         }
@@ -318,14 +331,14 @@ void gui_debug_window_tms9918a_patterns(void)
         {
             int selected_local_y = selected_tile_y - section_first_line;
             float t = (float)(0.5 + 0.5 * sin(ImGui::GetTime() * 4.0));
-            ImVec4 pulse_color = gui_debug_lerp_color(red, white, t);
-            draw_list->AddRect(ImVec2(p_tiles.x + (selected_tile_x * spacing), p_tiles.y + (selected_local_y * spacing)), ImVec2(p_tiles.x + ((selected_tile_x + 1) * spacing), p_tiles.y + ((selected_local_y + 1) * spacing)), ImColor(pulse_color), 2.0f, ImDrawFlags_RoundCornersAll, 2.0f);
+            ImVec4 pulse_color = gui_lerp_color(red, white, t);
+            draw_list->AddRect(ImVec2(p_tiles.x + (selected_tile_x * spacing), p_tiles.y + (selected_local_y * spacing)), ImVec2(p_tiles.x + ((selected_tile_x + 1) * spacing), p_tiles.y + ((selected_local_y + 1) * spacing)), ImColor(pulse_color), 2.0f, 2.0f, ImDrawFlags_StrokeCenterBiased);
         }
 
         if ((hovered_section == section) && !(hovered_tile_x == selected_tile_x && hovered_tile_y == selected_tile_y))
         {
             int hovered_local_y = hovered_tile_y - section_first_line;
-            draw_list->AddRect(ImVec2(p_tiles.x + (hovered_tile_x * spacing), p_tiles.y + (hovered_local_y * spacing)), ImVec2(p_tiles.x + ((hovered_tile_x + 1) * spacing), p_tiles.y + ((hovered_local_y + 1) * spacing)), ImColor(cyan), 2.0f, ImDrawFlags_RoundCornersAll, 2.0f);
+            draw_list->AddRect(ImVec2(p_tiles.x + (hovered_tile_x * spacing), p_tiles.y + (hovered_local_y * spacing)), ImVec2(p_tiles.x + ((hovered_tile_x + 1) * spacing), p_tiles.y + ((hovered_local_y + 1) * spacing)), ImColor(cyan), 2.0f, 2.0f, ImDrawFlags_StrokeCenterBiased);
         }
 
         if (section < section_count - 1)
@@ -345,7 +358,7 @@ void gui_debug_window_tms9918a_patterns(void)
             selected_tile_y = hovered_tile_y;
 
             int tile = (hovered_tile_y << 5) + hovered_tile_x;
-            int pattern_table_addr = (regs[4] & (mode == 2 ? 0x04 : 0x07)) << 11;
+            int pattern_table_addr = (regs[4] & (split_pattern_table ? 0x04 : 0x07)) << 11;
             int goto_addr = (pattern_table_addr + (tile << 3)) & 0x3FFF;
             gui_debug_memory_goto(MEMORY_EDITOR_VRAM, goto_addr);
         }
@@ -365,11 +378,11 @@ void gui_debug_window_tms9918a_patterns(void)
         ImGui::TextColored(brown, "DETAILS:");
 
         int tile = (tile_y << 5) + tile_x;
-        int pattern_table_addr = (regs[4] & (mode == 2 ? 0x04 : 0x07)) << 11;
-        int section = split_mode2 ? (tile_y / lines_per_section) : 0;
-        int table_addr = (pattern_table_addr + (split_mode2 ? (section * 0x800) : 0)) & 0x3FFF;
+        int pattern_table_addr = (regs[4] & (split_pattern_table ? 0x04 : 0x07)) << 11;
+        int section = split_pattern_table ? (tile_y / lines_per_section) : 0;
+        int table_addr = (pattern_table_addr + (split_pattern_table ? (section * 0x800) : 0)) & 0x3FFF;
         int tile_in_section = ((tile_y % lines_per_section) << 5) + tile_x;
-        int tile_addr = split_mode2 ? ((table_addr + (tile_in_section << 3)) & 0x3FFF) : ((pattern_table_addr + (tile << 3)) & 0x3FFF);
+        int tile_addr = split_pattern_table ? ((table_addr + (tile_in_section << 3)) & 0x3FFF) : ((pattern_table_addr + (tile << 3)) & 0x3FFF);
 
         ImGui::TextColored(cyan, " Table Addr:"); ImGui::SameLine();
         ImGui::Text("$%04X", table_addr);
@@ -454,15 +467,15 @@ void gui_debug_window_tms9918a_sprites(void)
         if (is_hovered && selected_sprite != s)
         {
             ImDrawList* dl = ImGui::GetWindowDrawList();
-            dl->AddRect(ImVec2(spr_pos[s].x, spr_pos[s].y), ImVec2(spr_pos[s].x + spr_width, spr_pos[s].y + spr_height), ImColor(cyan), 2.0f, ImDrawFlags_RoundCornersAll, 3.0f);
+            dl->AddRect(ImVec2(spr_pos[s].x, spr_pos[s].y), ImVec2(spr_pos[s].x + spr_width, spr_pos[s].y + spr_height), ImColor(cyan), 2.0f, 3.0f, ImDrawFlags_StrokeCenterBiased);
         }
 
         if (selected_sprite == s)
         {
             float t = (float)(0.5 + 0.5 * sin(ImGui::GetTime() * 4.0));
-            ImVec4 pulse_color = gui_debug_lerp_color(red, white, t);
+            ImVec4 pulse_color = gui_lerp_color(red, white, t);
             ImDrawList* dl = ImGui::GetWindowDrawList();
-            dl->AddRect(ImVec2(spr_pos[s].x, spr_pos[s].y), ImVec2(spr_pos[s].x + spr_width, spr_pos[s].y + spr_height), ImColor(pulse_color), 2.0f, ImDrawFlags_RoundCornersAll, 3.0f);
+            dl->AddRect(ImVec2(spr_pos[s].x, spr_pos[s].y), ImVec2(spr_pos[s].x + spr_width, spr_pos[s].y + spr_height), ImColor(pulse_color), 2.0f, 3.0f, ImDrawFlags_StrokeCenterBiased);
         }
 
         if (s % 4 < 3)
@@ -495,13 +508,25 @@ void gui_debug_window_tms9918a_sprites(void)
         int x = vram[sprite_attribute_offset + 1];
         int y = vram[sprite_attribute_offset];
 
-        int final_y = (y + 1) & 0xFF;
+        int final_y = y;
 
-        if (final_y >= 0xE0)
-            final_y = -(0x100 - final_y);
+        if (final_y > 0xE0)
+            final_y -= 0x100;
+
+        final_y++;
 
         float real_x = (float)(x - sprite_shift);
         float real_y = (float)final_y;
+
+        if (video->GetOverscan() != Video::OverscanDisabled)
+        {
+            real_y += (float)(video->IsPAL() ? GC_RESOLUTION_OVERSCAN_V_PAL : GC_RESOLUTION_OVERSCAN_V);
+
+            if (video->GetOverscan() == Video::OverscanFull284)
+                real_x += (float)GC_RESOLUTION_SMS_OVERSCAN_H_284_L;
+            else if (video->GetOverscan() == Video::OverscanFull320)
+                real_x += (float)GC_RESOLUTION_SMS_OVERSCAN_H_320_L;
+        }
 
         float max_width = sprites_16 ? 16.0f : 8.0f;
         float max_height = sprites_16 ? 16.0f : 8.0f;
@@ -523,9 +548,9 @@ void gui_debug_window_tms9918a_sprites(void)
         recty_max = fminf(fmaxf(recty_max, p_screen.y), p_screen.y + (runtime.screen_height * screen_scale));
 
         float t = (float)(0.5 + 0.5 * sin(ImGui::GetTime() * 4.0));
-        ImVec4 pulse_color = gui_debug_lerp_color(red, white, t);
+        ImVec4 pulse_color = gui_lerp_color(red, white, t);
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        dl->AddRect(ImVec2(rectx_min, recty_min), ImVec2(rectx_max, recty_max), ImColor(pulse_color), 2.0f, ImDrawFlags_RoundCornersAll, 2.0f);
+        dl->AddRect(ImVec2(rectx_min, recty_min), ImVec2(rectx_max, recty_max), ImColor(pulse_color), 2.0f, 2.0f, ImDrawFlags_StrokeCenterBiased);
 
         ImGui::TextColored(brown, "DETAILS:");
         ImGui::TextColored(cyan, " X:"); ImGui::SameLine();
@@ -671,6 +696,7 @@ void gui_debug_window_tms9918a_regs(void)
 
     Video* video = emu_get_core()->GetVideo();
     u8* regs = video->GetRegisters();
+    int mode = video->GetMode();
 
     ImGui::PushFont(gui_default_font);
 
@@ -725,6 +751,9 @@ void gui_debug_window_tms9918a_regs(void)
     int sprite_gen_addr = (regs[6] & 0x07) << 11;
     int backdrop = regs[7] & 0x0F;
     int text_color = (regs[7] >> 4) & 0x0F;
+
+    if ((mode == 2) || (mode == 3) || (mode == 6))
+        pattern_table_addr &= 0x2000;
 
     ImGui::TextColored(violet, " NAME TABLE       ");ImGui::SameLine();ImGui::Text("$%04X", name_table_addr);
     ImGui::TextColored(violet, " COLOR TABLE      ");ImGui::SameLine();ImGui::Text("$%04X", color_table_addr);

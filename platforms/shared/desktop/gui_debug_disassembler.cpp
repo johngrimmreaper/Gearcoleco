@@ -313,7 +313,7 @@ void gui_debug_window_disassembler(void)
     ImGui::PopStyleVar();
 }
 
-void gui_debug_save_disassembler(const char* file_path, bool full)
+bool gui_debug_save_disassembler(const char* file_path, bool full)
 {
     FILE* file = fopen_utf8(file_path, "w");
 
@@ -325,7 +325,10 @@ void gui_debug_save_disassembler(const char* file_path, bool full)
             save_current_disassembler(file);
 
         fclose(file);
+        return true;
     }
+
+    return false;
 }
 
 static void draw_controls(void)
@@ -1187,6 +1190,11 @@ static void request_goto_address(u16 address)
     goto_address_target = address;
 }
 
+void gui_debug_goto_address(u16 address)
+{
+    request_goto_address(address);
+}
+
 static bool is_return_instruction(GC_Disassembler_Record* record)
 {
     if (!IsValidPointer(record) || record->size == 0)
@@ -1951,6 +1959,8 @@ static void add_bookmark_popup(void)
         add_bookmark_open = false;
     }
 
+    gui_center_next_window();
+
     if (ImGui::BeginPopupModal("Add Bookmark", NULL, ImGuiWindowFlags_AlwaysAutoResize))
     {
         static char address_bookmark[5] = "";
@@ -2030,6 +2040,8 @@ static void add_symbol_popup(void)
         ImGui::OpenPopup("Add Symbol");
         add_symbol_open = false;
     }
+
+    gui_center_next_window();
 
     if (ImGui::BeginPopupModal("Add Symbol", NULL, ImGuiWindowFlags_AlwaysAutoResize))
     {
@@ -2490,6 +2502,40 @@ DebugSymbol* gui_debug_get_symbol(u8 bank, u16 address)
     return is_fixed_symbol_visible(symbol) ? symbol : NULL;
 }
 
+const char* gui_debug_get_symbol_name(u16 bank, u16 address, bool* is_manual, bool* is_prebuilt)
+{
+    *is_manual = false;
+    *is_prebuilt = false;
+
+    if (IsValidPointer(fixed_symbols) && IsValidPointer(dynamic_symbols))
+    {
+        DebugSymbol* symbol = fixed_symbols[(u8)bank][address];
+        if (is_fixed_symbol_visible(symbol))
+        {
+            for (size_t i = 0; i < fixed_symbol_list.size(); i++)
+            {
+                if (fixed_symbol_list[i].symbol == symbol)
+                {
+                    *is_manual = (fixed_symbol_list[i].type == SymbolTypeManual);
+                    *is_prebuilt = (fixed_symbol_list[i].type == SymbolTypePrebuilt);
+                    break;
+                }
+            }
+            return symbol->text;
+        }
+
+        symbol = dynamic_symbols[(u8)bank][address];
+        if (IsValidPointer(symbol))
+            return symbol->text;
+    }
+
+    GC_Disassembler_Record* record = emu_get_core()->GetMemory()->GetDisassemblerRecord(address, (u8)bank);
+    if (IsValidPointer(record) && (record->auto_symbol[0] != 0))
+        return record->auto_symbol;
+
+    return NULL;
+}
+
 void gui_debug_find_symbols(const char* name, std::vector<DebugSymbol*>& symbols)
 {
     symbols.clear();
@@ -2506,6 +2552,12 @@ static void save_full_disassembler(FILE* file)
 {
     Memory* memory = emu_get_core()->GetMemory();
     bool assembler_syntax = disassembler_uses_assembler_syntax();
+
+    if (emu_get_core()->GetMachine() == GC_MACHINE_ADAM)
+    {
+        save_full_disassembler_map(file, assembler_syntax ? "" : "ADAM", memory->GetDisassemblerAdamMap(), 0x10000);
+        return;
+    }
 
     save_full_disassembler_map(file, assembler_syntax ? "" : "BIOS", memory->GetDisassemblerBiosMap(), 0x2000);
     save_full_disassembler_map(file, assembler_syntax ? "" : "RAM", memory->GetDisassemblerRamMap(), 0x400);

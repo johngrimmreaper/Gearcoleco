@@ -19,6 +19,9 @@
 
 #include <SDL3/SDL_main.h>
 #include <stdlib.h>
+#if !defined(_WIN32)
+#include <signal.h>
+#endif
 #include "gearcoleco.h"
 #include "application.h"
 #include "application_headless.h"
@@ -28,8 +31,15 @@
 extern bool g_mcp_stdio_mode;
 extern bool g_mcp_router_enabled;
 
+static bool option_has_value(const char* option);
+static const char* option_value(int argc, char* argv[], int* i);
+
 int main(int argc, char* argv[])
 {
+#if !defined(_WIN32)
+    signal(SIGPIPE, SIG_IGN);
+#endif
+
     attach_parent_console(argc, argv);
 
     ApplicationParams app_params;
@@ -88,6 +98,18 @@ int main(int argc, char* argv[])
             {
                 portable = true;
             }
+            else if (strcmp(argv[i], "--load-state") == 0)
+            {
+                const char* value = option_value(argc, argv, &i);
+
+                if (!value)
+                    return -1;
+
+                if ((strlen(value) == 1) && (value[0] >= '1') && (value[0] <= '5'))
+                    app_params.state_slot = value[0] - '0';
+                else
+                    app_params.state_file = value;
+            }
             else if (strcmp(argv[i], "--mcp-http-port") == 0)
             {
                 if (i + 1 >= argc || argv[i + 1][0] == '-')
@@ -129,7 +151,7 @@ int main(int argc, char* argv[])
     int non_option_count = 0;
     for (int i = 1; i < argc; i++)
     {
-        if ((strcmp(argv[i], "--mcp-http-port") == 0) || (strcmp(argv[i], "--mcp-http-address") == 0))
+        if (option_has_value(argv[i]))
         {
             if (i + 1 < argc)
                 i++;
@@ -164,11 +186,13 @@ int main(int argc, char* argv[])
     {
         printf("Usage: %s [options] [rom_file] [symbol_file]\n", argv[0]);
         printf("\nArguments:\n");
-        printf("  [rom_file]                  ROM file: accepts ROMs (.col, .cv, .rom, .bin) or ZIP (.zip)\n");
+        printf("  [rom_file]                  Cartridge or ADAM media "
+            "(.col, .cv, .rom, .bin, .ddp, .dsk, .zip, .m3u)\n");
         printf("  [symbol_file]               Optional symbol file for debugging\n");
         printf("\nOptions:\n");
         printf("  -f, --fullscreen            Start in fullscreen mode\n");
         printf("  -w, --windowed              Start in windowed mode with menu visible\n");
+        printf("      --load-state SLOT       Load save state slot 1-5, or a state file, once the media is loaded\n");
         printf("      --mcp-stdio             Auto-start MCP server with stdio transport\n");
         printf("      --mcp-http              Auto-start MCP server with HTTP transport\n");
         printf("      --mcp-router            Enable compact MCP tool routing\n");
@@ -230,4 +254,28 @@ int main(int argc, char* argv[])
     config_destroy();
 
     return ret;
+}
+
+static bool option_has_value(const char* option)
+{
+    static const char* const k_options[] = { "--mcp-http-port", "--mcp-http-address", "--load-state" };
+
+    for (size_t i = 0; i < sizeof(k_options) / sizeof(k_options[0]); i++)
+    {
+        if (strcmp(option, k_options[i]) == 0)
+            return true;
+    }
+
+    return false;
+}
+
+static const char* option_value(int argc, char* argv[], int* i)
+{
+    if ((*i + 1 >= argc) || (argv[*i + 1][0] == '-'))
+    {
+        fprintf(stderr, "Missing value for %s\n", argv[*i]);
+        return NULL;
+    }
+
+    return argv[++(*i)];
 }

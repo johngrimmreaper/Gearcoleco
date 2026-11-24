@@ -19,6 +19,9 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\src\Adam.cpp" />
+    <ClCompile Include="..\..\src\AdamMedia.cpp" />
+    <ClCompile Include="..\..\src\AdamNet.cpp" />
     <ClCompile Include="..\..\src\Audio.cpp" />
     <ClCompile Include="..\..\src\audio\Blip_Buffer.cpp" />
     <ClCompile Include="..\..\src\audio\Effects_Buffer.cpp" />
@@ -29,6 +32,9 @@
     <ClCompile Include="..\..\src\ColecoVisionIOPorts.cpp" />
     <ClCompile Include="..\..\src\GearcolecoCore.cpp" />
     <ClCompile Include="..\..\src\Input.cpp" />
+    <ClCompile Include="..\..\src\KeyMap.cpp" />
+    <ClCompile Include="..\..\src\KeyMapper.cpp" />
+    <ClCompile Include="..\..\src\OsdCanvas.cpp" />
     <ClCompile Include="..\..\src\Mapper.cpp" />
     <ClCompile Include="..\..\src\Memory.cpp" />
     <ClCompile Include="..\..\src\opcodes.cpp" />
@@ -36,6 +42,7 @@
     <ClCompile Include="..\..\src\opcodes_ed.cpp" />
     <ClCompile Include="..\..\src\Processor.cpp" />
     <ClCompile Include="..\..\src\TraceLogger.cpp" />
+    <ClCompile Include="..\..\src\Profiler.cpp" />
     <ClCompile Include="..\..\src\VgmRecorder.cpp" />
     <ClCompile Include="..\..\src\TMS9918A.cpp" />
     <ClCompile Include="..\..\src\F18A.cpp" />
@@ -49,11 +56,16 @@
     <ClCompile Include="..\shared\desktop\application_headless.cpp" />
     <ClCompile Include="..\shared\desktop\config.cpp" />
     <ClCompile Include="..\shared\desktop\emu.cpp" />
+    <ClCompile Include="..\shared\desktop\emu_adam.cpp" />
     <ClCompile Include="..\shared\desktop\rewind.cpp" />
     <ClCompile Include="..\shared\desktop\runahead.cpp" />
+    <ClCompile Include="..\shared\desktop\video_recorder.cpp" />
     <ClCompile Include="..\shared\desktop\gui.cpp" />
+    <ClCompile Include="..\shared\desktop\gui_adam.cpp" />
     <ClCompile Include="..\shared\desktop\gui_actions.cpp" />
+    <ClCompile Include="..\shared\desktop\gui_notifications.cpp" />
     <ClCompile Include="..\shared\desktop\gui_debug.cpp" />
+    <ClCompile Include="..\shared\desktop\gui_debug_adam.cpp" />
     <ClCompile Include="..\shared\desktop\gui_debug_ay8910.cpp" />
     <ClCompile Include="..\shared\desktop\gui_debug_disassembler.cpp" />
     <ClCompile Include="..\shared\desktop\gui_debug_memeditor.cpp" />
@@ -64,10 +76,12 @@
     <ClCompile Include="..\shared\desktop\gui_debug_tms9918.cpp" />
     <ClCompile Include="..\shared\desktop\gui_debug_f18a.cpp" />
     <ClCompile Include="..\shared\desktop\gui_debug_trace_logger.cpp" />
+    <ClCompile Include="..\shared\desktop\gui_debug_profiler.cpp" />
     <ClCompile Include="..\shared\desktop\trace_logger_formatter.cpp" />
     <ClCompile Include="..\shared\desktop\gui_filedialogs.cpp" />
     <ClCompile Include="..\shared\desktop\gui_menus.cpp" />
     <ClCompile Include="..\shared\desktop\gui_popups.cpp" />
+    <ClCompile Include="..\shared\desktop\gui_shader.cpp" />
     <ClCompile Include="..\shared\desktop\main.cpp" />
     <ClCompile Include="..\shared\desktop\ogl_renderer.cpp" />
     <ClCompile Include="..\shared\desktop\ogl_shader_program.cpp" />
@@ -76,6 +90,8 @@
     <ClCompile Include="..\shared\desktop\display.cpp" />
     <ClCompile Include="..\shared\desktop\events.cpp" />
     <ClCompile Include="..\shared\desktop\gamepad.cpp" />
+    <ClCompile Include="..\shared\desktop\game_focus.cpp" />
+    <ClCompile Include="..\shared\desktop\hotkeys.cpp" />
     <ClCompile Include="..\shared\desktop\mcp\mcp_debug_adapter.cpp" />
     <ClCompile Include="..\shared\desktop\mcp\mcp_tool_registry.cpp" />
     <ClCompile Include="..\shared\desktop\mcp\mcp_server.cpp" />
@@ -112,6 +128,9 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\src\Adam.h" />
+    <ClInclude Include="..\..\src\AdamMedia.h" />
+    <ClInclude Include="..\..\src\AdamNet.h" />
     <ClInclude Include="..\..\src\log.h" />
     <ClInclude Include="..\..\src\ActivisionMapper.h" />
     <ClInclude Include="..\..\src\Audio.h" />
@@ -133,6 +152,13 @@
     <ClInclude Include="..\..\src\gearcoleco.h" />
     <ClInclude Include="..\..\src\GearcolecoCore.h" />
     <ClInclude Include="..\..\src\Input.h" />
+    <ClInclude Include="..\..\src\AdamKeys.h" />
+    <ClInclude Include="..\..\src\AdamKeyMapperLayout.h" />
+    <ClInclude Include="..\..\src\HostKeys.h" />
+    <ClInclude Include="..\..\src\KeyMap.h" />
+    <ClInclude Include="..\..\src\KeyMapper.h" />
+    <ClInclude Include="..\..\src\OsdCanvas.h" />
+    <ClInclude Include="..\..\src\OsdFont.h" />
     <ClInclude Include="..\..\src\IOPorts.h" />
     <ClInclude Include="..\..\src\Mapper.h" />
     <ClInclude Include="..\..\src\MegaCartMapper.h" />
@@ -157,6 +183,7 @@
     <ClInclude Include="..\..\src\SixteenBitRegister.h" />
     <ClInclude Include="..\..\src\StandardMapper.h" />
     <ClInclude Include="..\..\src\TraceLogger.h" />
+    <ClInclude Include="..\..\src\Profiler.h" />
     <ClInclude Include="..\..\src\VgmRecorder.h" />
     <ClInclude Include="..\..\src\Video.h" />
     <ClInclude Include="..\..\src\TMS9918A.h" />
@@ -193,10 +220,15 @@
     <ClInclude Include="..\shared\desktop\config_macros.h" />
     <ClInclude Include="..\shared\desktop\console_utils.h" />
     <ClInclude Include="..\shared\desktop\emu.h" />
+    <ClInclude Include="..\shared\desktop\emu_adam.h" />
     <ClInclude Include="..\shared\desktop\gui.h" />
     <ClInclude Include="..\shared\desktop\gui_actions.h" />
+    <ClInclude Include="..\shared\desktop\gui_notifications.h" />
     <ClInclude Include="..\shared\desktop\gui_debug.h" />
+    <ClInclude Include="..\shared\desktop\gui_adam.h" />
+    <ClInclude Include="..\shared\desktop\gui_debug_adam.h" />
     <ClInclude Include="..\shared\desktop\gui_debug_ay8910.h" />
+    <ClInclude Include="..\shared\desktop\gui_colors.h" />
     <ClInclude Include="..\shared\desktop\gui_debug_constants.h" />
     <ClInclude Include="..\shared\desktop\gui_debug_disassembler.h" />
     <ClInclude Include="..\shared\desktop\gui_debug_memeditor.h" />
@@ -208,11 +240,13 @@
     <ClInclude Include="..\shared\desktop\gui_debug_tms9918.h" />
     <ClInclude Include="..\shared\desktop\gui_debug_f18a.h" />
     <ClInclude Include="..\shared\desktop\gui_debug_trace_logger.h" />
+    <ClInclude Include="..\shared\desktop\gui_debug_profiler.h" />
     <ClInclude Include="..\shared\desktop\trace_logger_formatter.h" />
     <ClInclude Include="..\shared\desktop\gui_debug_widgets.h" />
     <ClInclude Include="..\shared\desktop\gui_filedialogs.h" />
     <ClInclude Include="..\shared\desktop\gui_menus.h" />
     <ClInclude Include="..\shared\desktop\gui_popups.h" />
+    <ClInclude Include="..\shared\desktop\gui_shader.h" />
     <ClInclude Include="..\..\src\ips_patch.h" />
     <ClInclude Include="..\shared\desktop\license.h" />
     <ClInclude Include="..\shared\desktop\mcp\mcp_debug_adapter.h" />
@@ -226,8 +260,11 @@
     <ClInclude Include="..\shared\desktop\display.h" />
     <ClInclude Include="..\shared\desktop\rewind.h" />
     <ClInclude Include="..\shared\desktop\runahead.h" />
+    <ClInclude Include="..\shared\desktop\video_recorder.h" />
     <ClInclude Include="..\shared\desktop\events.h" />
     <ClInclude Include="..\shared\desktop\gamepad.h" />
+    <ClInclude Include="..\shared\desktop\game_focus.h" />
+    <ClInclude Include="..\shared\desktop\hotkeys.h" />
     <ClInclude Include="..\shared\desktop\utils.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>
@@ -239,6 +276,9 @@
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Gearcoleco.rc" />
+    <ResourceCompile Include="version.rc">
+      <PreprocessorDefinitions>EMULATOR_BUILD="$(EmulatorBuild)";EMULATOR_VERSION=$(EmulatorVersionResource);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
@@ -246,6 +286,10 @@
     <ProjectGuid>{B12702AD-ABFB-343A-A199-8E24837244A3}</ProjectGuid>
     <RootNamespace>Gearcoleco</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <EmulatorBuild Condition="'$(EmulatorBuild)' == ''">undefined</EmulatorBuild>
+    <EmulatorVersion>$([System.Text.RegularExpressions.Regex]::Match('$(EmulatorBuild)', '^[0-9]+\.[0-9]+\.[0-9]+').Value)</EmulatorVersion>
+    <EmulatorVersion Condition="'$(EmulatorVersion)' == ''">0.0.0</EmulatorVersion>
+    <EmulatorVersionResource>$([System.String]::Copy('$(EmulatorVersion)').Replace('.', ',')),0</EmulatorVersionResource>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
@@ -329,14 +373,15 @@
       <BrowseInformation>false</BrowseInformation>
       <DebugInformationFormat>None</DebugInformationFormat>
       <DisableSpecificWarnings>4577;%(DisableSpecificWarnings)</DisableSpecificWarnings>
-      <ExceptionHandling>Sync</ExceptionHandling>
+      <ExceptionHandling>false</ExceptionHandling>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
       <ObjectFileName>$(IntDir)</ObjectFileName>
       <Optimization>MaxSpeed</Optimization>
-      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;UNICODE;WIN32;WIN64;NDEBUG;EMULATOR_BUILD="$(EmulatorBuild)";%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;UNICODE;WIN32;WIN64;NDEBUG;_HAS_EXCEPTIONS=0;EMULATOR_BUILD="$(EmulatorBuild)";%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessToFile>false</PreprocessToFile>
       <ProgramDataBaseFileName>$(IntDir)vc$(PlatformToolsetVersion).pdb</ProgramDataBaseFileName>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
-      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <RuntimeTypeInfo>false</RuntimeTypeInfo>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <TreatWChar_tAsBuiltInType>true</TreatWChar_tAsBuiltInType>
       <WarningLevel>Level3</WarningLevel>
@@ -352,6 +397,8 @@
       <RandomizedBaseAddress>true</RandomizedBaseAddress>
       <SubSystem>Windows</SubSystem>
       <SuppressStartupBanner>true</SuppressStartupBanner>
+      <OptimizeReferences>true</OptimizeReferences>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
     <Midl>
@@ -371,14 +418,15 @@
       <BrowseInformation>false</BrowseInformation>
       <DebugInformationFormat>None</DebugInformationFormat>
       <DisableSpecificWarnings>4577;%(DisableSpecificWarnings)</DisableSpecificWarnings>
-      <ExceptionHandling>Sync</ExceptionHandling>
+      <ExceptionHandling>false</ExceptionHandling>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
       <ObjectFileName>$(IntDir)</ObjectFileName>
       <Optimization>MaxSpeed</Optimization>
-      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;UNICODE;WIN32;WIN64;NDEBUG;EMULATOR_BUILD="$(EmulatorBuild)";%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;UNICODE;WIN32;WIN64;NDEBUG;_HAS_EXCEPTIONS=0;EMULATOR_BUILD="$(EmulatorBuild)";%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessToFile>false</PreprocessToFile>
       <ProgramDataBaseFileName>$(IntDir)vc$(PlatformToolsetVersion).pdb</ProgramDataBaseFileName>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
-      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <RuntimeTypeInfo>false</RuntimeTypeInfo>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <TreatWChar_tAsBuiltInType>true</TreatWChar_tAsBuiltInType>
       <WarningLevel>Level3</WarningLevel>
@@ -394,6 +442,8 @@
       <RandomizedBaseAddress>true</RandomizedBaseAddress>
       <SubSystem>Windows</SubSystem>
       <SuppressStartupBanner>true</SuppressStartupBanner>
+      <OptimizeReferences>true</OptimizeReferences>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
     <Midl>

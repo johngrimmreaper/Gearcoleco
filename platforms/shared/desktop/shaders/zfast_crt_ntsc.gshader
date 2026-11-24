@@ -1,8 +1,9 @@
-; Zfast CRT + NTSC preset for Geargrafx.
+; Zfast CRT + NTSC preset for Gearcoleco.
 ; Adds a color-only NTSC YIQ pass before the zfast CRT pass.
 
 [Preset]
 Name=Zfast CRT + NTSC
+Group=Zfast CRT
 Passes=2
 
 [Pass0]

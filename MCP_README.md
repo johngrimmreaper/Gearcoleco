@@ -1,10 +1,12 @@
 # Gearcoleco MCP Server
 
-Gearcoleco includes a built-in [Model Context Protocol](https://modelcontextprotocol.io/introduction) (MCP) server that enables AI-assisted debugging through AI agents like GitHub Copilot, Claude, Codex and similar.
+Gearcoleco includes a built-in [Model Context Protocol](https://modelcontextprotocol.io/introduction) (MCP) server that enables AI-assisted debugging through AI agents like Claude Code, Codex and similar.
 
-This server provides tools for ColecoVision game development, rom hacking, reverse engineering, and debugging through standardized MCP protocols.
+This server provides tools for ColecoVision and Coleco ADAM development, ROM hacking, reverse engineering, and debugging through standardized MCP protocols.
 
 ## Downloads
+
+These MCP Bundles (`.mcpb`) package Gearcoleco with its MCP server configuration for MCP clients that install bundles, and are the packages published to the [MCP Registry](https://registry.modelcontextprotocol.io/). Claude Code and Codex use a regular Gearcoleco build instead, see [Quick Start](#quick-start).
 
 <table>
   <thead>
@@ -18,29 +20,29 @@ This server provides tools for ColecoVision game development, rom hacking, rever
     <tr>
       <td rowspan="2"><strong>Windows</strong></td>
       <td>x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-mcpb-windows-x64.mcpb">Gearcoleco-1.6.13-mcpb-windows-x64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.8.1/Gearcoleco-1.8.1-mcpb-windows-x64.mcpb">Gearcoleco-1.8.1-mcpb-windows-x64.mcpb</a></td>
     </tr>
     <tr>
       <td>ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-mcpb-windows-arm64.mcpb">Gearcoleco-1.6.13-mcpb-windows-arm64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.8.1/Gearcoleco-1.8.1-mcpb-windows-arm64.mcpb">Gearcoleco-1.8.1-mcpb-windows-arm64.mcpb</a></td>
     </tr>
     <tr>
       <td rowspan="2"><strong>macOS</strong></td>
       <td>x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-mcpb-macos-x64.mcpb">Gearcoleco-1.6.13-mcpb-macos-x64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.8.1/Gearcoleco-1.8.1-mcpb-macos-x64.mcpb">Gearcoleco-1.8.1-mcpb-macos-x64.mcpb</a></td>
     </tr>
     <tr>
       <td>ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-mcpb-macos-arm64.mcpb">Gearcoleco-1.6.13-mcpb-macos-arm64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.8.1/Gearcoleco-1.8.1-mcpb-macos-arm64.mcpb">Gearcoleco-1.8.1-mcpb-macos-arm64.mcpb</a></td>
     </tr>
     <tr>
       <td rowspan="2"><strong>Linux</strong></td>
       <td>x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-mcpb-linux-x64.mcpb">Gearcoleco-1.6.13-mcpb-linux-x64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.8.1/Gearcoleco-1.8.1-mcpb-linux-x64.mcpb">Gearcoleco-1.8.1-mcpb-linux-x64.mcpb</a></td>
     </tr>
     <tr>
       <td>ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-mcpb-linux-arm64.mcpb">Gearcoleco-1.6.13-mcpb-linux-arm64.mcpb</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.8.1/Gearcoleco-1.8.1-mcpb-linux-arm64.mcpb">Gearcoleco-1.8.1-mcpb-linux-arm64.mcpb</a></td>
     </tr>
   </tbody>
 </table>
@@ -48,7 +50,7 @@ This server provides tools for ColecoVision game development, rom hacking, rever
 ## Features
 
 - Full debugger access: pause, continue, step into/over/out, step frame, reset
-- Memory inspection across all ColecoVision memory areas: BIOS, RAM, SGM RAM, VRAM, ROM
+- Memory inspection across all memory areas: BIOS, RAM, SGM RAM, VRAM, ROM
 - Just-in-time disassembly with symbols and bank resolution
 - Z80 CPU register read/write
 - Hardware state inspection: TMS9918 VDP registers/status, SN76489 PSG, AY-3-8910 (SGM)
@@ -57,11 +59,14 @@ This server provides tools for ColecoVision game development, rom hacking, rever
 - Disassembler bookmarks and call stack inspection
 - Memory editor: bookmarks, watches, memory search, byte finding
 - Trace logger: CPU instructions, VDP, PSG, AY-3-8910, I/O, input, SGM, mapper, EEPROM, and SRAM events
+- Profiler: per-function call counts, calls per frame, and inclusive/exclusive cycle statistics
 - Rewind (time travel debugging)
 - Screenshot capture as base64-encoded PNG
+- Video recording to AVI files (MJPEG, uncompressed or PNG compressed video with PCM audio)
 - Save state management (5 slots)
 - Controller input (directional, keypad 0-9, *, #, blue, purple, left/right buttons)
 - Effective input state inspection, including pending tap releases
+- ADAM key map: per-game bindings, host key presses through the map, and the keyboard mapper
 - Fast forward control
 - GUI integration (works with or without the GUI running)
 - Two transport modes: STDIO (for AI tool integration) and HTTP (for remote access)
@@ -69,13 +74,20 @@ This server provides tools for ColecoVision game development, rom hacking, rever
 ## Transport Modes
 
 ### STDIO Mode
-The server communicates through standard input/output using JSON-RPC 2.0 messages. This is the recommended mode for AI tool integration (VS Code, Claude Desktop, etc.).
+The server communicates through standard input/output using JSON-RPC 2.0 messages. This is the recommended mode for AI tool integration (Claude Code, Codex, etc.).
 
 ### HTTP Mode
 The server listens for HTTP POST requests on a configurable port (default: 7777). Useful for remote connections or custom tooling.
 
 ### Headless Mode
 Run the emulator without a GUI, using only the MCP server for control. Ideal for automated testing and CI/CD.
+
+A save state can be loaded at launch too, with `--load-state 1` for slot 1 or `--load-state FILE` for a state file; run `gearcoleco --help` for the full list.
+
+Headless mode is debug mode without rendering, so the debug output settings apply: screenshots use the output overscan from the **Debug** menu instead of the one in the **Video** menu. By default, overscan is disabled. Headless instances read this setting from the configuration file, so set it in the GUI with debug enabled. The same setting applies when the MCP server runs alongside the GUI, because MCP always runs in debug mode.
+
+### Pause When Inactive
+While the MCP server is running, the emulator keeps running when its window loses focus, even with **Pause When Inactive** enabled in the **Emulator** menu. The setting keeps its value and applies again once the server stops.
 
 ### Concurrent Clients
 
@@ -95,7 +107,7 @@ By default, Gearcoleco exposes every MCP tool directly. This avoids nested tool 
 
 Add `--mcp-router` to expose a compact set of high-frequency tools directly and route advanced debugger tools through lightweight discovery tools. This reduces MCP context while preserving access to the full debugger surface.
 
-Direct tools in routed mode: `load_media`, `get_media_info`, `debug_pause`, `debug_continue`, `debug_step_into`, `get_z80_status`, `read_memory`, `write_memory`, `get_disassembly`, `set_breakpoint`, `get_screenshot`, and `controller_button`.
+Direct tools in routed mode: `load_media`, `start_adam`, `get_media_info`, `get_adam_status`, `list_adam_media`, `debug_pause`, `debug_continue`, `debug_step_into`, `get_z80_status`, `read_memory`, `write_memory`, `get_disassembly`, `set_breakpoint`, `get_screenshot`, `controller_button`, and `adam_keyboard`.
 
 Router tools:
 
@@ -118,15 +130,25 @@ Without `--mcp-router`, call every MCP tool directly.
 
 ## Quick Start
 
-### STDIO Mode with VS Code
+Get a desktop build of Gearcoleco from the [downloads](README.md#downloads) or [build it from source](README.md#build-instructions). In the examples below, replace `/path/to/gearcoleco` with the full path to the executable:
 
-1. Install the [GitHub Copilot extension](https://code.visualstudio.com/docs/copilot/overview) in VS Code.
+- **macOS:** `/Applications/Gearcoleco.app/Contents/MacOS/gearcoleco`
+- **Linux:** `/path/to/gearcoleco`
+- **Windows:** `C:/path/to/gearcoleco.exe`
 
-2. Add `.vscode/mcp.json` to your workspace:
+### STDIO Mode with Claude Code
+
+1. **Add the Gearcoleco MCP server** using the CLI:
+
+   ```bash
+   claude mcp add --transport stdio --scope user gearcoleco -- /path/to/gearcoleco --mcp-stdio
+   ```
+
+   Everything after `--` is passed to Gearcoleco untouched. `--scope user` makes the server available in all your projects. Use `--scope local` (the default) to add it only to the current project, or `--scope project` to share it through a `.mcp.json` file in the project root:
 
    ```json
    {
-     "servers": {
+     "mcpServers": {
        "gearcoleco": {
          "command": "/path/to/gearcoleco",
          "args": ["--mcp-stdio"]
@@ -135,65 +157,43 @@ Without `--mcp-router`, call every MCP tool directly.
    }
    ```
 
-   Update the `command` path to match your build or release binary:
-   - macOS: `/path/to/gearcoleco`
-   - Linux: `/path/to/gearcoleco`
-   - Windows: `C:/path/to/Gearcoleco.exe`
+   Claude Code asks for approval the first time it uses a server from `.mcp.json`.
 
-3. Restart VS Code if the MCP server is not discovered immediately.
-
-### STDIO Mode with Claude Desktop
-
-#### Option 1: Desktop Extension (Recommended)
-
-The easiest way to install the Gearcoleco MCP server on Claude Desktop is with the MCPB package:
-
-1. Download the latest MCPB package for your platform from the [releases page](https://github.com/drhelius/Gearcoleco/releases).
-
-2. Install the extension:
-   - Open Claude Desktop
-   - Navigate to **Settings > Extensions**
-   - Click **Advanced settings**
-   - In the Extension Developer section, click **Install Extension...**
-   - Select the downloaded `.mcpb` file
-
-3. Start debugging. The extension is available in conversations and launches Gearcoleco when the tool is enabled.
-
-#### Option 2: Manual Configuration
-
-If you prefer to build from source or configure manually, edit Claude Desktop's MCP settings:
-
-```json
-{
-  "mcpServers": {
-    "gearcoleco": {
-      "command": "/path/to/gearcoleco",
-      "args": ["--mcp-stdio"]
-    }
-  }
-}
-```
-
-Config file locations:
-- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-- Linux: `~/.config/Claude/claude_desktop_config.json`
-
-Restart Claude Desktop after saving the configuration.
-
-### STDIO Mode with Claude Code
-
-1. Add the Gearcoleco MCP server using the CLI:
-
-   ```bash
-   claude mcp add --transport stdio gearcoleco -- /path/to/gearcoleco --mcp-stdio
-   ```
-
-2. Verify the server was added:
+2. **Verify the server was added**:
 
    ```bash
    claude mcp list
    ```
+
+3. **Start debugging**: Start Claude Code and ask about the game state. Gearcoleco launches when the session starts. Run `/mcp` inside Claude Code to check the server status or reconnect it.
+
+### STDIO Mode with Codex
+
+The Codex CLI, IDE extension, and desktop app share the same MCP configuration, so you only need to add the server once.
+
+1. **Add the Gearcoleco MCP server** using the CLI:
+
+   ```bash
+   codex mcp add gearcoleco -- /path/to/gearcoleco --mcp-stdio
+   ```
+
+   Or add it to `~/.codex/config.toml`:
+
+   ```toml
+   [mcp_servers.gearcoleco]
+   command = "/path/to/gearcoleco"
+   args = ["--mcp-stdio"]
+   ```
+
+   To use the server only in one project, add the same table to `.codex/config.toml` in that project. Codex loads project configuration only for trusted projects. In TOML, write Windows paths with forward slashes or in single quotes.
+
+2. **Verify the server was added**:
+
+   ```bash
+   codex mcp list
+   ```
+
+3. **Start debugging**: Start Codex and ask about the game state. Gearcoleco launches when the session starts. Type `/mcp` in the Codex CLI to see the active servers.
 
 ### HTTP Mode
 
@@ -201,67 +201,64 @@ Restart Claude Desktop after saving the configuration.
 
    ```bash
    ./gearcoleco --mcp-http
-  ```
-
-  The default endpoint is `http://127.0.0.1:7777/mcp`.
-
-  To use a custom port:
-
-  ```bash
-   ./gearcoleco --mcp-http --mcp-http-port 3000
-  ```
-
-  To bind to a custom address, set a bearer token first:
-
-  ```bash
-  GEARCOLECO_MCP_HTTP_TOKEN="change-this-token" ./gearcoleco --mcp-http --mcp-http-address 0.0.0.0 --mcp-http-port 3000
    ```
 
-  Clients must connect using the server's actual interface address, such as `http://192.168.1.50:3000/mcp`, not `0.0.0.0` or a spoofed loopback address.
+   The default endpoint is `http://127.0.0.1:7777/mcp`.
 
-  You can also start the server using the "MCP" menu in the GUI.
+   To use a custom port:
+
+   ```bash
+   ./gearcoleco --mcp-http --mcp-http-port 3000
+   ```
+
+   To bind to a custom address, set a bearer token first:
+
+   ```bash
+   GEARCOLECO_MCP_HTTP_TOKEN="change-this-token" ./gearcoleco --mcp-http --mcp-http-address 0.0.0.0 --mcp-http-port 3000
+   ```
+
+   Clients must connect using the server's actual interface address, such as `http://192.168.1.50:3000/mcp`, not `0.0.0.0` or a spoofed loopback address.
+
+   You can also start the server using the "MCP" menu in the GUI.
 
 2. **Configure bearer-token authentication**:
 
-  Set `GEARCOLECO_MCP_HTTP_TOKEN` before starting HTTP mode. Authentication is optional for loopback binds and required for wildcard or other non-loopback binds.
+   Set `GEARCOLECO_MCP_HTTP_TOKEN` before starting HTTP mode. Authentication is optional for loopback binds and required for wildcard or other non-loopback binds.
 
-  macOS and Linux:
+   macOS and Linux:
 
-  ```bash
-  GEARCOLECO_MCP_HTTP_TOKEN="change-this-token" ./gearcoleco --mcp-http
-  ```
-
-  Windows PowerShell:
-
-  ```powershell
-  $env:GEARCOLECO_MCP_HTTP_TOKEN = "change-this-token"
-  .\gearcoleco.exe --mcp-http
-  ```
-
-  Windows Command Prompt:
-
-  ```cmd
-  set GEARCOLECO_MCP_HTTP_TOKEN=change-this-token
-  gearcoleco.exe --mcp-http
-  ```
-
-3. **Configure VS Code** `.vscode/mcp.json`:
-
-   ```json
-   {
-     "servers": {
-       "gearcoleco": {
-         "type": "http",
-         "url": "http://127.0.0.1:7777/mcp",
-         "headers": {
-           "Authorization": "Bearer change-this-token"
-         }
-       }
-     }
-   }
+   ```bash
+   GEARCOLECO_MCP_HTTP_TOKEN="change-this-token" ./gearcoleco --mcp-http
    ```
 
-4. **Or configure Claude Desktop**:
+   Windows PowerShell:
+
+   ```powershell
+   $env:GEARCOLECO_MCP_HTTP_TOKEN = "change-this-token"
+   .\gearcoleco.exe --mcp-http
+   ```
+
+   Windows Command Prompt:
+
+   ```cmd
+   set GEARCOLECO_MCP_HTTP_TOKEN=change-this-token
+   gearcoleco.exe --mcp-http
+   ```
+
+3. **Configure Claude Code**:
+
+   ```bash
+   claude mcp add --transport http --scope user gearcoleco http://127.0.0.1:7777/mcp
+   ```
+
+   If the server uses a bearer token, add the header:
+
+   ```bash
+   claude mcp add --transport http --scope user gearcoleco http://127.0.0.1:7777/mcp \
+     --header "Authorization: Bearer change-this-token"
+   ```
+
+   In a shared `.mcp.json`, read the token from the environment instead of committing it:
 
    ```json
    {
@@ -270,20 +267,34 @@ Restart Claude Desktop after saving the configuration.
          "type": "http",
          "url": "http://127.0.0.1:7777/mcp",
          "headers": {
-           "Authorization": "Bearer change-this-token"
+           "Authorization": "Bearer ${GEARCOLECO_MCP_HTTP_TOKEN}"
          }
        }
      }
    }
    ```
 
-5. **Or configure Claude Code**:
+4. **Or configure Codex**:
 
    ```bash
-  claude mcp add --transport http gearcoleco http://127.0.0.1:7777/mcp
+   codex mcp add gearcoleco --url http://127.0.0.1:7777/mcp
    ```
 
-6. **Restart your AI client** and start debugging
+   If the server uses a bearer token, Codex reads it from an environment variable, so set `GEARCOLECO_MCP_HTTP_TOKEN` in the environment where Codex runs too:
+
+   ```bash
+   codex mcp add gearcoleco --url http://127.0.0.1:7777/mcp --bearer-token-env-var GEARCOLECO_MCP_HTTP_TOKEN
+   ```
+
+   The equivalent `~/.codex/config.toml` entry:
+
+   ```toml
+   [mcp_servers.gearcoleco]
+   url = "http://127.0.0.1:7777/mcp"
+   bearer_token_env_var = "GEARCOLECO_MCP_HTTP_TOKEN"
+   ```
+
+5. **Start a new Claude Code or Codex session** and start debugging
 
 > **Note:** The MCP HTTP Server must be running standalone before connecting the AI client.
 > **Security:** Without `GEARCOLECO_MCP_HTTP_TOKEN`, HTTP mode starts only on a loopback address. Wildcard and other non-loopback binds are refused. `Host` and browser `Origin` values are matched to the connection's actual destination address to prevent DNS rebinding and address spoofing.
@@ -302,6 +313,7 @@ Once configured, you can ask your AI assistant:
 - "Pause execution and show me all sprites"
 - "Step through the next 5 instructions"
 - "Capture a screenshot of the current frame"
+- "Record a video of the next 600 frames to /path/to/clip.avi"
 - "Tap keypad 1 on player 1 controller"
 
 ### Advanced Debugging Workflows
@@ -311,6 +323,7 @@ Once configured, you can ask your AI assistant:
 - "Locate the routine that updates score digits in RAM and add memory watches for those addresses"
 - "Trace CPU instructions and VDP writes for one frame, then summarize the rendering flow"
 - "Compare SGM RAM before and after this routine runs and identify what data structure changed"
+- "Profile the game for a few seconds, then tell me which functions use the most CPU time per frame and what they do"
 
 ## Available MCP Tools
 
@@ -325,7 +338,7 @@ This is the full tool catalog. All tools are exposed directly by default. With `
 | `debug_step_over` | Step over calls |
 | `debug_step_out` | Step out of current call |
 | `debug_step_frame` | Step one or more frames. Optional `frames` is 1-1000 (default 1). Optional `mode` is `async` (default, returns after scheduling) or `sync` (returns after all requested frames complete at VBlank). Use `mode: "sync"` when issuing dependent tool calls. |
-| `debug_reset` | Reset the ColecoVision system |
+| `debug_reset` | Reset the active ColecoVision or ADAM machine |
 | `debug_get_status` | Get current debug state |
 
 ### CPU & Registers
@@ -355,6 +368,16 @@ This is the full tool catalog. All tools are exposed directly by default. With `
 | `lookup_symbol_at_address` | Find symbol at bank/address |
 | `get_call_stack` | Get current call stack |
 
+### Profiler
+| Tool | Description |
+|------|-------------|
+| `set_profiler` | Start, stop, or reset the function profiler |
+| `get_profiler_data` | Read per-function call counts and cycle statistics |
+
+`set_profiler` takes `action` (`start`, `stop`, `reset`). `start` opens the Profiler debugger window and `stop` closes it. Statistics are only collected while the window is visible (in headless mode, while started), starting on the next frame.
+
+`get_profiler_data` returns `collecting`, `window_open`, `total_cycles`, `frame_cycles`, `frames`, `function_count`, and per-function `name`, `symbol` (`manual`, `prebuilt`, `auto`, or `none`), `bank`, `address`, `type`, `calls`, `calls_per_frame`, `inclusive_cycles`, `inclusive_percent`, `exclusive_cycles`, `exclusive_percent`, `average_cycles`, `min_cycles`, and `max_cycles`. Optional `sort` (`inclusive`, `exclusive`, `calls`, `average`, `max`; highest first), `count` (default 50, max 1000), and `filter` (name or hex address substring).
+
 ### Breakpoints
 | Tool | Description |
 |------|-------------|
@@ -371,7 +394,12 @@ This is the full tool catalog. All tools are exposed directly by default. With `
 | `get_vdp_status` | Get VDP status flags, mode, render state |
 | `get_psg_status` | Get SN76489 PSG channel state |
 | `get_ay8910_status` | Get AY-3-8910 SGM sound chip state |
-| `get_media_info` | Get loaded ROM information |
+| `get_adam_status` | Get ADAM firmware, MIOC/control, boot, and live CPU map state |
+| `get_adamnet_status` | Get ADAMnet controller, active transfer, PCB/DCBs, and keyboard state |
+| `get_media_info` | Get the active machine, cartridge, firmware, and ADAM media information |
+| `list_adam_media` | List four ADAM core media slots plus desktop persistence paths |
+| `get_adam_printer_output` | Read the captured ADAM printer spool as text and hex |
+| `clear_adam_printer_output` | Clear the captured ADAM printer spool |
 
 ### Sprites & Screen
 | Tool | Description |
@@ -379,12 +407,20 @@ This is the full tool catalog. All tools are exposed directly by default. With `
 | `list_sprites` | List TMS9918 sprite attributes |
 | `get_sprite_image` | Capture sprite as PNG |
 | `get_screenshot` | Capture screen as PNG |
+| `start_video_recording` | Start recording video and audio to an AVI file |
+| `stop_video_recording` | Stop recording and finalize the AVI file |
+
+`start_video_recording` writes MJPEG, uncompressed or PNG compressed video with 16-bit PCM audio. Only the resulting `file_path` is returned; the video stays on disk. It takes optional `file_path` (absolute; if omitted, an automatic name in the configured video recordings directory), `scale` (1-20), `aspect_ratio` (`screen`, `square`, `4:3`, `16:9`, `16:10`), and `quality` (`low`, `medium`, `high`, `lossless`, `lossless_compressed`). `lossless` is uncompressed; `lossless_compressed` stores PNG frames, much smaller but playable only with FFmpeg based players. Given options update the recording settings, same as the GUI menu. `screen` follows the display aspect ratio, which uses square pixels while debugging. When a shader preset is active outside debug mode, the shader output is recorded at the output window size and `scale` and `aspect_ratio` are ignored. Frames are recorded only while the emulator runs, so continue or step execution before stopping.
+
+`stop_video_recording` finalizes the file and returns `file_path` and the number of recorded `frames`.
 
 ### Media & State Management
 | Tool | Description |
 |------|-------------|
-| `list_recent_media` | List the 10 most recent ROM files opened by Gearcoleco |
-| `load_media` | Load a ROM file |
+| `list_recent_media` | List the 15 most recent cartridge or ADAM media files opened by Gearcoleco |
+| `start_adam` | Start a firmware-only ADAM SmartWriter session |
+| `load_media` | Load a cartridge or ADAM `.ddp`/`.dsk`/`.zip`/`.m3u` file |
+| `load_bios` | Load a BIOS or firmware file and save its path. Types: `os7` (ColecoVision BIOS, default), `eos`, and `smartwriter` |
 | `list_save_state_slots` | List save state slots |
 | `select_save_state_slot` | Select active slot |
 | `save_state` / `load_state` | Save/load state |
@@ -404,14 +440,20 @@ This is the full tool catalog. All tools are exposed directly by default. With `
 
 `set_trace_log` accepts `output` (`memory` or `disk`), `memory_size` (`100K`, `500K`, `1M`, `2M`, `5M`), `disk_size` (`10MB`, `50MB`, `100MB`, `250MB`, `500MB`, `1GB`, `unbounded`), and an `output_path` directory. Omitting `filters` selects CPU instructions and interrupts. Disk capture uses a 100K staging ring, flushes continuously, stops on staging overflow or the configured complete-line size limit, and reports write/flush/close failures.
 
-Exact filters are `cpu.instructions`, `cpu.interrupts`, `vdp.registers`, `vdp.interrupts`, `vdp.status`, `vdp.sprites`, `vdp.timing`, `vdp.vram`, `psg.tone`, `psg.volume`, `psg.noise`, `ay8910.registers`, `ay8910.tone`, `ay8910.noise_mixer`, `ay8910.volume`, `ay8910.envelope`, `ay8910.io`, `io.reads`, `io.writes`, `input.reads`, `input.writes`, `sgm.control`, `mapper.banks`, `mapper.eeprom`, and `mapper.sram`. Filters must be non-empty, unique, and exact. Cycle values use the core master clock; `RESET` denotes a clock discontinuity while absolute sequence identity remains monotonic.
+Exact filters are `cpu.instructions`, `cpu.interrupts`, `vdp.registers`, `vdp.interrupts`, `vdp.status`, `vdp.sprites`, `vdp.sprite_budget`, `vdp.sprite_limit`, `vdp.missed_vblank`, `vdp.timing`, `vdp.vram`, `psg.tone`, `psg.volume`, `psg.noise`, `ay8910.registers`, `ay8910.tone`, `ay8910.noise_mixer`, `ay8910.volume`, `ay8910.envelope`, `ay8910.io`, `io.reads`, `io.writes`, `input.reads`, `input.writes`, `sgm.control`, `adam.map`, `adam.commands`, `adam.dma`, `adam.errors`, `mapper.banks`, `mapper.eeprom`, and `mapper.sram`. Filters must be non-empty, unique, and exact. `vdp.sprite_budget` records one entry per active line with the number of sprites on that line against the per-line limit (4 on the TMS9918A, or the F18A sprite limit register), flagging lines that hit the limit and how many sprites were dropped; `vdp.sprite_limit` records only the lines that hit the limit. Unlike `vdp.sprites`, which only reports when the fifth-sprite status flag gets set, these streams report every line. `vdp.missed_vblank` logs each frame where the Z80 access set with `vblank_watch_address` (hex) and `vblank_watch_operation` (`read`, `write`, or `read_write`) did not happen before the VDP VBlank (when the frame flag is set and the NMI is raised if enabled), with the number of consecutive misses; the first VBlank after starting, changing the watch, resetting, or loading a state only arms the check. Both parameters persist and keep their current values when omitted. Cycle values use the core master clock; `RESET` denotes a clock discontinuity while absolute sequence identity remains monotonic.
 
 ### Controller Input
 | Tool | Description |
 |------|-------------|
 | `controller_button` | Press/release controller buttons (directional, keypad, yellow/red, blue/purple) |
+| `adam_keyboard` | Press, release, or tap a semantic ADAM keyboard key |
 | `controller_macro` | Run ordered `tap`, `press`, `release`, and `wait` input commands |
 | `get_input_state` | Get effective pressed buttons and pending tap releases |
+| `host_key` | Press, release or tap a host key through the ADAM key map, as the host keyboard would; while the keyboard mapper is open it goes to the mapper. Host keys are USB HID names (`a`, `up`, `f1`, `left_shift`...) |
+| `get_key_map` | Get the ADAM key map: `enabled` (key mapping on), `mapper_open`, the per-game `.keys` `file`, the `user` bindings, `remapped` host keys with what they drive now, and the `unreachable` ADAM keys |
+| `set_key_binding` | Bind a `host` key to `keys` for this game and save its `.keys` file: one ADAM key, up to 4 joined with `+`, `none`, or `default` to drop the binding |
+| `set_key_mapping` | Turn the game's key mapping on or off with `enabled`; off, every host key types its **ADAM > Keyboard** key |
+| `open_key_mapper` / `close_key_mapper` | Open the full screen keyboard mapper (ADAM stops until it closes), or close it and save the game's bindings |
 
 ### Memory Editor
 | Tool | Description |
@@ -428,6 +470,7 @@ The MCP server also exposes hardware reference documents via `resources/list` an
 | Resource URI | Description |
 |--------------|-------------|
 | `gearcoleco://hardware/colecovision` | Memory map, I/O ports, controllers, SGM RAM windows, breakpoint areas |
+| `gearcoleco://hardware/adam` | ADAM firmware, MIOC/control map, ADAMnet PCB/DCBs, media, keyboard, and trace filters |
 | `gearcoleco://hardware/tms9918a` | VDP registers, status flags, VRAM tables, sprites |
 | `gearcoleco://hardware/sn76489` | Base SN76489 PSG channels and write model |
 | `gearcoleco://hardware/super_game_module` | SGM RAM mapping, ADAM compatibility, and AY-3-8910 port summary |
@@ -447,8 +490,8 @@ The MCP server runs alongside the emulator GUI in a background thread.
 
 ```text
 +-----------------+                    +------------------+
-| VS Code /       |       stdio        | Gearcoleco       |
-| Claude Desktop  |<------------------>| MCP Server       |
+| Claude Code /   |       stdio        | Gearcoleco       |
+| Codex           |<------------------>| MCP Server       |
 | (AI Client)     |       pipes        | (background)     |
 +-----------------+                    +------------------+
   |                                      |
@@ -465,8 +508,8 @@ The MCP server runs alongside the emulator GUI in a background thread.
 
 ```text
 +-----------------+                    +------------------+
-| VS Code /       |  HTTP port 7777    | Gearcoleco       |
-| Claude Desktop  |<------------------>| MCP HTTP Server  |
+| Claude Code /   |  HTTP port 7777    | Gearcoleco       |
+| Codex           |<------------------>| MCP HTTP Server  |
 | (AI Client)     |                    | (listener)       |
 +-----------------+                    +------------------+
                  |

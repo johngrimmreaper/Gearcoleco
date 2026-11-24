@@ -54,9 +54,44 @@ struct retro_core_option_v2_category option_cats_us[] = {
     { NULL, NULL, NULL },
 };
 
+
 struct retro_core_option_v2_definition option_defs_us[] = {
 
     /* System */
+
+    {
+        "gearcoleco_cartridge_hardware", "Cartridge Hardware (restart)", NULL,
+        "Select hardware for cartridge ROMs only. Disks, data packs, playlists and no-content startup always use ADAM.",
+        NULL, "system",
+        { { "ColecoVision", NULL }, { "ADAM", NULL }, { NULL, NULL } }, "ColecoVision"
+    },
+    {
+        "gearcoleco_adam_disk_drive", "ADAM Disk Control Drive", NULL,
+        "Choose which drive the frontend Disk Control menu operates. Other drives remain mounted. Loaded media selects the primary content drive.",
+        NULL, "system",
+        { { "Loaded media", NULL }, { "Disk 1", NULL }, { "Disk 2", NULL },
+          { "Data Pack 1", NULL }, { "Data Pack 2", NULL }, { NULL, NULL } }, "Loaded media"
+    },
+    {
+        "gearcoleco_adam_computer_reset", "ADAM Computer Reset", NULL,
+        "Select Reset to boot the computer from mounted media, or SmartWriter when none is bootable. To request it again, select Idle then Reset. Normal frontend Reset retains the current boot mode.",
+        NULL, "system",
+        { { "Idle", NULL }, { "Reset", NULL }, { NULL, NULL } }, "Idle"
+    },
+    {
+        "gearcoleco_adam_writable_media",
+        "ADAM Writable Media (restart)",
+        NULL,
+        "Disabled mounts ADAM media write protected. Save-directory working copy stores writes in complete images under the frontend save directory and never overwrites source content.",
+        NULL,
+        "system",
+        {
+            { "Disabled",                    NULL },
+            { "Save-directory working copy", NULL },
+            { NULL, NULL },
+        },
+        "Disabled"
+    },
 
     {
         "gearcoleco_timing",
@@ -210,8 +245,11 @@ struct retro_core_option_v2_definition option_defs_us[] = {
         "1"
     },
 
-    { NULL, NULL, NULL, NULL, NULL, NULL, {{0}}, NULL },
+
+
+    { NULL, NULL, NULL, NULL, NULL, NULL, {{NULL, NULL}}, NULL },
 };
+
 
 struct retro_core_options_v2 options_us = {
     option_cats_us,

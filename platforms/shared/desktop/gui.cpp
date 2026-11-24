@@ -19,6 +19,7 @@
 
 #include <math.h>
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "implot.h"
 #include "fonts/RobotoMedium.h"
 #include "fonts/MaterialIcons.h"
@@ -26,37 +27,54 @@
 #include "config.h"
 #include "application.h"
 #include "emu.h"
+#include "events.h"
+#include "game_focus.h"
 #include "ogl_renderer.h"
 #include "utils.h"
 #include "gearcoleco.h"
+#include "KeyMapper.h"
 
 #define GUI_IMPORT
 #include "gui.h"
+#include "gui_adam.h"
+#include "emu_adam.h"
 #include "gui_menus.h"
+#include "gui_shader.h"
 #include "gui_popups.h"
 #include "gui_actions.h"
+#include "gui_notifications.h"
+#include "gui_colors.h"
+#include "gui_filedialogs.h"
 #include "gui_debug.h"
 #include "gui_debug_memory.h"
 #include "gui_debug_disassembler.h"
 #include "gui_debug_psg.h"
 #include "gui_debug_trace_logger.h"
 
-static bool status_message_active = false;
-static char status_message[4096] = "";
-static Uint64 status_message_start_time = 0;
-static Uint64 status_message_duration = 0;
 static bool error_window_active = false;
 static char error_message[4096] = "";
 static bool loading_rom_active = false;
+static int pending_state_slot = 0;
+static std::string pending_state_path;
 static char loading_rom_path[4096] = "";
 static char loading_symbol_path[4096] = "";
+static bool output_focus_requested = false;
+static bool output_focus_restore = false;
+static bool output_blocked = false;
+static bool output_debug = false;
+static bool output_powered = false;
+static bool output_game_focus = false;
+static bool output_captured = false;
 
 
 static void main_window(void);
-static void show_status_message(void);
+static void update_output_focus(bool output_was_focused);
+static void update_key_mapper_pointer(const ImVec2& min, const ImVec2& max);
 static void show_error_window(void);
 static void show_loading_popup(void);
-static bool finish_loading_rom(void);
+static void select_save_slot(int slot);
+static bool finish_started_content(bool load_symbols);
+static void load_pending_state(void);
 static void update_window_visibility_padding(void);
 static GC_Color color_float_to_int(ImVec4 color);
 static ImVec4 color_int_to_float(GC_Color color);
@@ -105,22 +123,48 @@ bool gui_init(void)
     for (int i = 0; i < 4; i++)
     {
         font_cfg.SizePixels = (13.0f + (i * 3));
-        gui_default_fonts[i] = io.Fonts->AddFontDefault(&font_cfg);
+        font_cfg.GlyphMinAdvanceX = font_cfg.SizePixels * 7.0f / 13.0f;
+        font_cfg.GlyphMaxAdvanceX = font_cfg.GlyphMinAdvanceX;
+        gui_default_fonts[0][i] = io.Fonts->AddFontDefaultVector(&font_cfg);
+        gui_default_fonts[1][i] = io.Fonts->AddFontDefaultBitmap(&font_cfg);
     }
 
-    gui_default_font = gui_default_fonts[config_debug.font_size];
+    gui_apply_settings();
+
+    if (strlen(gui_bios_path) > 0)
+        emu_load_bios(gui_bios_path);
+
+    if (strlen(gui_adam_eos_path) > 0)
+        emu_load_adam_firmware(GC_ADAM_FIRMWARE_EOS, gui_adam_eos_path);
+
+    if (strlen(gui_adam_smartwriter_path) > 0)
+        emu_load_adam_firmware(GC_ADAM_FIRMWARE_SMARTWRITER, gui_adam_smartwriter_path);
+
+    gui_debug_init();
+    gui_init_menus();
+
+    return true;
+}
+
+void gui_apply_settings(void)
+{
+    gui_default_font = gui_default_fonts[config_debug.font_type][config_debug.font_size];
 
     set_style();
+
+    emu_audio_sync = config_audio.sync;
 
     emu_audio_mute(!config_audio.enable);
     emu_audio_set_master_volume(config_audio.master_volume);
 
     emu_set_video_chip(config_video.video_chip);
-    emu_set_overscan(config_debug.debug ? 0 : config_video.overscan);
+    emu_set_overscan(config_debug.debug ? config_debug.overscan : config_video.overscan);
 
     strncpy_fit(gui_bios_path, config_emulator.bios_path.c_str(), sizeof(gui_bios_path));
-    if (strlen(gui_bios_path) > 0)
-        emu_load_bios(gui_bios_path);
+
+    strncpy_fit(gui_adam_eos_path, config_emulator.adam_eos_path.c_str(), sizeof(gui_adam_eos_path));
+
+    strncpy_fit(gui_adam_smartwriter_path, config_emulator.adam_smartwriter_path.c_str(), sizeof(gui_adam_smartwriter_path));
 
     emu_video_no_sprite_limit(config_video.sprite_limit);
     emu_set_disassembler_syntax(config_debug.dis_syntax);
@@ -132,12 +176,8 @@ bool gui_init(void)
     strncpy_fit(gui_savefiles_path, config_emulator.savefiles_path.c_str(), sizeof(gui_savefiles_path));
     strncpy_fit(gui_savestates_path, config_emulator.savestates_path.c_str(), sizeof(gui_savestates_path));
     strncpy_fit(gui_screenshots_path, config_emulator.screenshots_path.c_str(), sizeof(gui_screenshots_path));
+    strncpy_fit(gui_video_recordings_path, config_emulator.video_recordings_path.c_str(), sizeof(gui_video_recordings_path));
     strncpy_fit(gui_mcp_http_address, config_emulator.mcp_http_address.c_str(), sizeof(gui_mcp_http_address));
-
-    gui_debug_init();
-    gui_init_menus();
-
-    return true;
 }
 
 void gui_destroy(void)
@@ -150,6 +190,9 @@ void gui_destroy(void)
 
 void gui_render(void)
 {
+    bool keyboard_was_active = events_is_adam_keyboard_active();
+    bool output_was_focused = gui_main_window_focused;
+    output_captured = events_is_adam_keyboard_captured();
     ImGui::NewFrame();
 
     update_window_visibility_padding();
@@ -160,138 +203,162 @@ void gui_render(void)
     gui_in_use = gui_dialog_in_use;
 
     gui_main_menu();
+    update_output_focus(output_was_focused);
 
     gui_main_window_hovered = false;
+    gui_main_window_focused = false;
+    gui_main_window_sdl_window_id = 0;
 
     if((!config_debug.debug && !emu_is_empty()) || (config_debug.debug && config_debug.show_screen))
         main_window();
 
     gui_debug_windows();
+    gui_adam_windows();
+    gui_shader_parameters_window();
 
     if (config_emulator.show_info)
         gui_show_info();
 
     show_loading_popup();
-    show_status_message();
+    gui_notifications_render();
     show_error_window();
+
+    if (!config_debug.debug && !emu_is_empty() && emu_get_machine() == GC_MACHINE_ADAM)
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        gui_main_window_focused = SDL_GetKeyboardFocus() == application_sdl_window && !io.WantCaptureKeyboard && !io.WantTextInput;
+    }
+
+    if (keyboard_was_active && !events_is_adam_keyboard_active())
+        events_release_adam_keys();
 
     ImGui::Render();
 }
 
-void gui_shortcut(gui_ShortCutEvent event)
+void gui_hotkey(config_HotkeyIndex hotkey, bool pressed)
 {
-    switch (event)
+    if (hotkey == config_HotkeyIndex_Rewind)
+    {
+        if (pressed)
+            gui_action_rewind_pressed();
+        else
+            gui_action_rewind_released();
+
+        return;
+    }
+
+    if (!pressed)
+        return;
+
+    switch (hotkey)
     {  
-    case gui_ShortcutOpenROM:
+    case config_HotkeyIndex_OpenROM:
         gui_shortcut_open_rom = true;
         break;
-    case gui_ShortcutReloadROM:
+    case config_HotkeyIndex_ReloadROM:
         gui_action_reload_rom();
         break;
-    case gui_ShortcutReset:
+    case config_HotkeyIndex_Quit:
+        application_trigger_quit();
+        break;
+    case config_HotkeyIndex_Reset:
         gui_action_reset();
         break;
-    case gui_ShortcutPause:
+    case config_HotkeyIndex_Pause:
         gui_action_pause();
         break;
-    case gui_ShortcutFFWD:
+    case config_HotkeyIndex_FFWD:
         config_emulator.ffwd = !config_emulator.ffwd;
         gui_action_ffwd();
         break;
-    case gui_ShortcutMute:
+    case config_HotkeyIndex_Mute:
         config_audio.enable = !config_audio.enable;
         emu_audio_mute(!config_audio.enable);
+        gui_notify(gui_NotificationInfo, config_audio.enable ? ICON_MD_VOLUME_UP : ICON_MD_VOLUME_OFF,
+            config_audio.enable ? "Audio unmuted" : "Audio muted", NULL, "mute", gui_NotificationDurationShort);
         break;
-    case gui_ShortcutSaveState:
-    {
-        std::string message("Saving state to slot ");
-        message += std::to_string(config_emulator.save_slot + 1);
-        gui_set_status_message(message.c_str(), 3000);
-        emu_save_state_slot(config_emulator.save_slot + 1);
+    case config_HotkeyIndex_SaveState:
+        gui_action_save_state(NULL);
         break;
-    }
-    case gui_ShortcutLoadState:
-    {
-        std::string message("Loading state from slot ");
-        message += std::to_string(config_emulator.save_slot + 1);
-        gui_set_status_message(message.c_str(), 3000);
-        emu_load_state_slot(config_emulator.save_slot + 1);
+    case config_HotkeyIndex_LoadState:
+        gui_action_load_state(NULL);
         break;
-    }
-    case gui_ShortcutSelectSlot1:
-        config_emulator.save_slot = 0;
+    case config_HotkeyIndex_SelectSlot1:
+        select_save_slot(0);
         break;
-    case gui_ShortcutSelectSlot2:
-        config_emulator.save_slot = 1;
+    case config_HotkeyIndex_SelectSlot2:
+        select_save_slot(1);
         break;
-    case gui_ShortcutSelectSlot3:
-        config_emulator.save_slot = 2;
+    case config_HotkeyIndex_SelectSlot3:
+        select_save_slot(2);
         break;
-    case gui_ShortcutSelectSlot4:
-        config_emulator.save_slot = 3;
+    case config_HotkeyIndex_SelectSlot4:
+        select_save_slot(3);
         break;
-    case gui_ShortcutSelectSlot5:
-        config_emulator.save_slot = 4;
+    case config_HotkeyIndex_SelectSlot5:
+        select_save_slot(4);
         break;
-    case gui_ShortcutScreenshot:
+    case config_HotkeyIndex_Screenshot:
         gui_action_save_screenshot(NULL);
         break;
-    case gui_ShortcutFullscreen:
+    case config_HotkeyIndex_VideoRecording:
+        gui_action_toggle_video_recording();
+        break;
+    case config_HotkeyIndex_Fullscreen:
+        if (emu_is_video_recording())
+            break;
         config_emulator.fullscreen = !config_emulator.fullscreen;
         application_trigger_fullscreen(config_emulator.fullscreen);
         break;
-    case gui_ShortcutCaptureMouse:
-        config_emulator.capture_mouse = !config_emulator.capture_mouse;
+    case config_HotkeyIndex_KeyboardMapper:
+        emu_key_mapper_toggle();
         break;
-    case gui_ShortcutDebugStepOver:
+    case config_HotkeyIndex_KeyMapping:
+        gui_action_toggle_key_mapping();
+        break;
+    case config_HotkeyIndex_GameFocus:
+        game_focus_toggle();
+        break;
+    case config_HotkeyIndex_DebugStepOver:
         if (config_debug.debug)
             emu_debug_step_over();
         break;
-    case gui_ShortcutDebugStepInto:
+    case config_HotkeyIndex_DebugStepInto:
         if (config_debug.debug)
             emu_debug_step_into();
         break;
-    case gui_ShortcutDebugStepOut:
+    case config_HotkeyIndex_DebugStepOut:
         if (config_debug.debug)
             emu_debug_step_out();
         break;
-    case gui_ShortcutDebugStepFrame:
+    case config_HotkeyIndex_DebugStepFrame:
         if (config_debug.debug)
         {
             emu_debug_step_frame();
             gui_debug_memory_step_frame();
         }
         break;
-    case gui_ShortcutDebugBreak:
+    case config_HotkeyIndex_DebugBreak:
         if (config_debug.debug)
             emu_debug_break();
         break;
-    case gui_ShortcutDebugContinue:
+    case config_HotkeyIndex_DebugContinue:
         if (config_debug.debug)
             emu_debug_continue();
         break;
-    case gui_ShortcutDebugRuntocursor:
+    case config_HotkeyIndex_DebugRunToCursor:
         if (config_debug.debug)
             gui_debug_runtocursor();
         break;
-    case gui_ShortcutDebugGoBack:
+    case config_HotkeyIndex_DebugGoBack:
         if (config_debug.debug)
             gui_debug_go_back();
         break;
-    case gui_ShortcutDebugBreakpoint:
+    case config_HotkeyIndex_DebugBreakpoint:
         if (config_debug.debug)
             gui_debug_toggle_breakpoint();
         break;
-    case gui_ShortcutDebugCopy:
-        gui_debug_memory_copy();
-        break;
-    case gui_ShortcutDebugPaste:
-        gui_debug_memory_paste();
-        break;
-    case gui_ShortcutDebugSelectAll:
-        gui_debug_memory_select_all();
-        break;
-    case gui_ShortcutShowMainMenu:
+    case config_HotkeyIndex_ShowMainMenu:
         config_emulator.always_show_menu = !config_emulator.always_show_menu;
         break;
     default:
@@ -305,7 +372,6 @@ bool gui_load_rom(const char* path, const char* symbol_path)
         return false;
 
     gui_debug_auto_save_settings();
-    config_push_recent_media(path);
     emu_resume();
 
     strncpy(loading_rom_path, path, sizeof(loading_rom_path) - 1);
@@ -317,11 +383,93 @@ bool gui_load_rom(const char* path, const char* symbol_path)
     }
     else
         loading_symbol_path[0] = '\0';
+    if (!emu_load_media_async(path, gui_get_force_configuration()))
+        return false;
+
     loading_rom_active = true;
 
-    emu_load_media_async(path, gui_get_force_configuration());
-
     return true;
+}
+
+bool gui_is_cartridge_file(const char* path)
+{
+    if (emu_is_busy())
+        return false;
+
+    EmuDesktopContent content = {};
+
+    bool valid = emu_adam_classify_content(path, GC_MACHINE_AUTO, &content) && content.type == EmuDesktopContentCartridge;
+
+    emu_adam_destroy_content(&content);
+
+    return valid;
+}
+
+bool gui_open_rom(const char* path, bool adam_cartridge)
+{
+    if (loading_rom_active)
+        return false;
+
+    if (!gui_is_cartridge_file(path))
+    {
+        gui_set_error_message("Open ROM accepts cartridge images. Insert ADAM disks and data packs using the ADAM drive menus.");
+        return false;
+    }
+
+    if (!emu_is_bios_loaded() || (adam_cartridge && !emu_are_adam_firmware_paths_valid()))
+    {
+        gui_adam_open_missing_firmware(adam_cartridge);
+        return false;
+    }
+
+    int previous_machine = config_emulator.machine;
+    int previous_boot = config_emulator.adam_boot_mode;
+    config_emulator.machine = adam_cartridge ? GC_MACHINE_ADAM : GC_MACHINE_COLECOVISION;
+    config_emulator.adam_boot_mode = adam_cartridge ? 2 : 0;
+    bool started = gui_load_rom(path);
+    config_emulator.machine = previous_machine;
+    config_emulator.adam_boot_mode = previous_boot;
+
+    return started;
+}
+
+void gui_drop_media(const char* path)
+{
+    if (emu_is_busy())
+        return;
+
+    EmuDesktopContent content = {};
+
+    if (!emu_adam_classify_content(path, GC_MACHINE_AUTO, &content))
+    {
+        emu_adam_destroy_content(&content);
+        gui_set_error_message("Unable to identify the dropped image. Use Open ROM or an ADAM drive's Insert menu.");
+        return;
+    }
+
+    EmuDesktopContentType type = content.type;
+
+    emu_adam_destroy_content(&content);
+
+    if (type == EmuDesktopContentCartridge)
+        gui_open_rom(path);
+    else
+        gui_adam_drop_media(path, type == EmuDesktopContentAdamDisk);
+}
+
+bool gui_start_adam(const char* const* media_paths)
+{
+    if (loading_rom_active)
+        return false;
+
+    gui_debug_auto_save_settings();
+
+    emu_resume();
+
+    if (!emu_start_adam(media_paths))
+        return false;
+
+    return finish_started_content(false);
 }
 
 bool gui_is_rom_loading(void)
@@ -339,18 +487,35 @@ bool gui_finish_loading_rom(void)
     bool success = emu_finish_media_loading();
 
     if (success)
-        success = finish_loading_rom();
-    else
     {
-        std::string message("Error loading ROM:\n");
-        message += loading_rom_path;
-        gui_set_error_message(message.c_str());
-
-        emu_get_core()->GetCartridge()->Reset();
-        gui_action_reset();
+        if (emu_get_machine() == GC_MACHINE_COLECOVISION)
+            config_push_recent_media(loading_rom_path);
+        else if (emu_get_core()->GetContentType() == GC_CONTENT_ADAM_DISK)
+            gui_adam_remember_media(GC_ADAM_MEDIA_DISK_1, loading_rom_path);
+        else if (emu_get_core()->GetContentType() == GC_CONTENT_ADAM_DATA_PACK)
+            gui_adam_remember_media(GC_ADAM_MEDIA_DATA_PACK_1, loading_rom_path);
+        success = finish_started_content(true);
     }
 
+    else
+    {
+        std::string message("Error loading content:\n");
+        message += loading_rom_path;
+        gui_set_error_message(message.c_str());
+    }
+
+
+    load_pending_state();
     return success;
+}
+
+void gui_load_state_after_media(int slot, const char* path)
+{
+    pending_state_slot = slot;
+    pending_state_path = IsValidPointer(path) ? path : "";
+
+    if (!loading_rom_active)
+        load_pending_state();
 }
 
 Cartridge::ForceConfiguration gui_get_force_configuration(void)
@@ -361,21 +526,31 @@ Cartridge::ForceConfiguration gui_get_force_configuration(void)
     return config;
 }
 
-void gui_set_status_message(const char* message, Uint64 milliseconds)
-{
-    if (config_emulator.status_messages)
-    {
-        strncpy_fit(status_message, message, sizeof(status_message));
-        status_message_active = true;
-        status_message_start_time = SDL_GetTicks();
-        status_message_duration = milliseconds;
-    }
-}
-
 void gui_set_error_message(const char* message)
 {
     strncpy_fit(error_message, message, sizeof(error_message));
     error_window_active = true;
+}
+
+void gui_center_next_window(void)
+{
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+}
+
+bool gui_has_open_window(void)
+{
+    ImGuiContext* context = ImGui::GetCurrentContext();
+
+    for (int i = 0; i < context->Windows.Size; i++)
+    {
+        ImGuiWindow* window = context->Windows[i];
+
+        if (window->Active && (window->Flags & ImGuiWindowFlags_NoTitleBar) == 0)
+            return true;
+    }
+
+    return false;
 }
 
 void gui_set_style(void)
@@ -423,7 +598,9 @@ static void main_window(void)
     int physical_w = (int)floorf(logical_w * framebuffer_scale_x);
     int physical_h = (int)floorf(logical_h * framebuffer_scale_y);
 
-    int selected_ratio = config_debug.debug ? 0 : config_video.ratio;
+    bool key_mapper = emu_key_mapper_is_open();
+    int selected_ratio = key_mapper ? 1 : (config_debug.debug ? 0 : config_video.ratio);
+    int selected_scale = (key_mapper && (config_video.scale == 3)) ? 2 : config_video.scale;
     float ratio = 0;
 
     switch (selected_ratio)
@@ -441,7 +618,7 @@ static void main_window(void)
             ratio = (float)runtime.screen_width / (float)runtime.screen_height;
     }
 
-    if (!config_debug.debug && config_video.scale == 3)
+    if (!config_debug.debug && selected_scale == 3)
     {
         ratio = logical_w / logical_h;
     }
@@ -455,7 +632,7 @@ static void main_window(void)
     if (config_debug.debug)
     {
         scale_multiplier = config_debug.scale;
-        w_corrected = base_width;
+        w_corrected = key_mapper ? (int)round(base_height * ratio) : base_width;
         h_corrected = base_height;
     }
     else
@@ -471,7 +648,7 @@ static void main_window(void)
             h_corrected = base_height;
         }
 
-        switch (config_video.scale)
+        switch (selected_scale)
         {
         case 0:
         {
@@ -498,7 +675,7 @@ static void main_window(void)
             break;
         }
 
-        if (config_video.scale <= 1)
+        if (selected_scale <= 1)
         {
             if (scale_multiplier < 1)
                 scale_multiplier = 1;
@@ -508,7 +685,7 @@ static void main_window(void)
     float image_w = (float)(w_corrected * scale_multiplier);
     float image_h = (float)(h_corrected * scale_multiplier);
 
-    if (config_debug.debug || config_video.scale <= 1)
+    if (config_debug.debug || selected_scale <= 1)
     {
         image_w /= framebuffer_scale_x;
         image_h /= framebuffer_scale_y;
@@ -531,7 +708,8 @@ static void main_window(void)
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
 
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar;
-    
+    bool window_visible = false;
+
     if (config_debug.debug)
     {
         flags |= ImGuiWindowFlags_AlwaysAutoResize;
@@ -539,8 +717,16 @@ static void main_window(void)
         ImGui::SetNextWindowPos(ImVec2(631, 26), ImGuiCond_FirstUseEver);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
 
-        ImGui::Begin("Output###debug_output", &config_debug.show_screen, flags);
+        if (output_focus_requested && !output_blocked)
+        {
+            ImGui::SetNextWindowFocus();
+            output_focus_requested = false;
+        }
+
+        const char* title = output_captured ? "Output (Keyboard Captured)###debug_output" : "Output###debug_output";
+        window_visible = ImGui::Begin(title, &config_debug.show_screen, flags);
         gui_main_window_hovered = ImGui::IsWindowHovered();
+        gui_main_window_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     }
     else
     {
@@ -556,27 +742,74 @@ static void main_window(void)
 
         flags |= ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoBringToFrontOnFocus;
 
-        ImGui::Begin(GEARCOLECO_TITLE, 0, flags);
+        window_visible = ImGui::Begin(GEARCOLECO_TITLE, 0, flags);
         gui_main_window_hovered = ImGui::IsWindowHovered();
+        gui_main_window_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     }
 
+    ImGuiViewport* output_viewport = ImGui::GetWindowViewport();
+    SDL_WindowID output_window_id = output_viewport ? (SDL_WindowID)(intptr_t)output_viewport->PlatformHandle : 0;
+
+    if (output_window_id != 0)
+        gui_main_window_sdl_window_id = output_window_id;
+    else if (application_sdl_window)
+        gui_main_window_sdl_window_id = SDL_GetWindowID(application_sdl_window);
+
     OglRendererScreenGeometry screen_geometry;
-    screen_geometry.logical_width = image_logical_width;
-    screen_geometry.logical_height = image_logical_height;
     screen_geometry.physical_width = image_physical_width;
     screen_geometry.physical_height = image_physical_height;
-    screen_geometry.framebuffer_scale_x = framebuffer_scale_x;
-    screen_geometry.framebuffer_scale_y = framebuffer_scale_y;
+    screen_geometry.framebuffer_scale = framebuffer_scale_x;
     ogl_renderer_set_screen_geometry(&screen_geometry);
 
     float tex_h = 1.0f;
     float tex_v = 1.0f;
     ogl_renderer_get_screen_uv(&tex_h, &tex_v);
 
-    ImGui::Image((ImTextureID)(intptr_t)ogl_renderer_get_screen_texture(), ImVec2(image_w, image_h), ImVec2(0, 0), ImVec2(tex_h, tex_v));
+    ImVec2 image_size(image_w, image_h);
+    ImVec2 layout_max = ImGui::GetCursorScreenPos() + image_size;
+    ImVec2 image_min = gui_snap_to_physical_pixel(ImGui::GetCursorScreenPos());
+    ImVec2 image_max = image_min + image_size;
 
-    if (config_video.fps)
-        gui_show_fps();
+    if (image_w > 0.0f && image_h > 0.0f)
+    {
+        ImGui::InvisibleButton("##output_image", image_size, ImGuiButtonFlags_MouseButtonLeft |
+            ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle);
+
+        if (ImGui::IsItemActive())
+            gui_main_window_hovered = true;
+    }
+    else
+        ImGui::Dummy(image_size);
+
+    if (window_visible)
+    {
+        ImDrawList* draw_list = ImGui::GetWindowDrawList();
+        ImVec2 clip_min = draw_list->GetClipRectMin();
+        ImVec2 clip_max = draw_list->GetClipRectMax();
+
+        if (!ImGui::IsWindowDocked())
+        {
+            if (clip_max.x > layout_max.x - 1.0f)
+                clip_max.x = fmaxf(clip_max.x, image_max.x);
+            if (clip_max.y > layout_max.y - 1.0f)
+                clip_max.y = fmaxf(clip_max.y, image_max.y);
+        }
+
+        draw_list->PushClipRect(clip_min, clip_max, false);
+        draw_list->AddImage((ImTextureID)(intptr_t)ogl_renderer_get_screen_texture(), image_min, image_max, ImVec2(0, 0), ImVec2(tex_h, tex_v));
+        draw_list->PopClipRect();
+
+        if (key_mapper)
+            update_key_mapper_pointer(image_min, image_max);
+
+        gui_notifications_render_output(image_min, image_max);
+
+        if (config_video.fps)
+            gui_show_fps(image_min, image_max);
+    }
+
+    if (config_debug.debug && (emu_get_machine() == GC_MACHINE_ADAM) && ImGui::IsItemHovered())
+        ImGui::SetTooltip("Click Output to type on the ADAM keyboard.\nClick a debugger tool to use its keyboard shortcuts.");
 
     ImGui::End();
 
@@ -585,37 +818,73 @@ static void main_window(void)
     ImGui::PopStyleVar();
 }
 
-static void show_status_message(void)
+static void update_output_focus(bool output_was_focused)
 {
-    if (status_message_active)
+    if (!config_debug.debug)
     {
-        Uint64 current_time = SDL_GetTicks();
-        if ((current_time - status_message_start_time) > status_message_duration)
-            status_message_active = false;
-        else
-            ImGui::OpenPopup("Status");
+        output_debug = false;
+        output_focus_requested = false;
+        return;
     }
 
-    if (status_message_active)
-    {
-        ImGui::SetNextWindowPos(ImVec2(0.0f, application_show_menu ? gui_main_menu_height : 0.0f));
-        ImGui::SetNextWindowSize(ImVec2(ImGui::GetIO().DisplaySize.x, 0.0f));
-        ImGui::SetNextWindowBgAlpha(0.9f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-        ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoNav;
+    bool blocked = gui_in_use || gui_dialog_in_use || gui_file_dialog_is_active() ||
+        ImGui::IsPopupOpen((const char*)NULL, ImGuiPopupFlags_AnyPopup);
+    bool powered = !emu_is_empty();
+    bool game_focus = game_focus_is_on();
 
-        if (ImGui::BeginPopup("Status", flags))
-        {
-            ImGui::PushFont(gui_default_font);
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.1f,0.9f,0.1f,1.0f));
-            ImGui::TextWrapped("%s", status_message);
-            ImGui::PopStyleColor();
-            ImGui::PopFont();
-            ImGui::EndPopup();
-        }
+    if (!output_debug || (powered && !output_powered) || (game_focus && !output_game_focus))
+        output_focus_requested = true;
 
-        ImGui::PopStyleVar();
-    }
+    if (blocked && !output_blocked)
+        output_focus_restore = output_was_focused;
+    else if (!blocked && output_blocked && output_focus_restore)
+        output_focus_requested = true;
+
+    output_debug = true;
+    output_blocked = blocked;
+    output_powered = powered;
+    output_game_focus = game_focus;
+}
+
+static void update_key_mapper_pointer(const ImVec2& min, const ImVec2& max)
+{
+    GC_RuntimeInfo runtime;
+    emu_get_runtime(runtime);
+    ImVec2 mouse = ImGui::GetMousePos();
+    float width = max.x - min.x;
+    float height = max.y - min.y;
+
+    if ((width <= 0.0f) || (height <= 0.0f) || !ImGui::IsMousePosValid(&mouse))
+        return;
+
+    int x = (int)(((mouse.x - min.x) * (float)runtime.screen_width) / width);
+    int y = (int)(((mouse.y - min.y) * (float)runtime.screen_height) / height);
+    emu_key_mapper_set_pointer(x, y);
+
+    bool over = gui_main_window_hovered && !gui_in_use;
+    u8 buttons = 0;
+
+    if (over && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+        buttons |= GC_KEY_MAPPER_BUTTON_LEFT;
+
+    if (over && ImGui::IsMouseDown(ImGuiMouseButton_Right))
+        buttons |= GC_KEY_MAPPER_BUTTON_RIGHT;
+
+    emu_key_mapper_set_buttons(buttons);
+}
+
+ImVec2 gui_snap_to_physical_pixel(const ImVec2& pos)
+{
+    ImGuiViewport* viewport = ImGui::GetWindowViewport();
+    ImVec2 scale = viewport->FramebufferScale;
+
+    if (scale.x <= 0.0f || scale.y <= 0.0f)
+        scale = ImGui::GetIO().DisplayFramebufferScale;
+
+    float x = ceilf(((pos.x - viewport->Pos.x) * scale.x) - 0.5f - 0.01f);
+    float y = ceilf(((pos.y - viewport->Pos.y) * scale.y) - 0.5f - 0.01f);
+
+    return ImVec2(viewport->Pos.x + (x / scale.x), viewport->Pos.y + (y / scale.y));
 }
 
 static void show_loading_popup(void)
@@ -667,18 +936,30 @@ static void show_loading_popup(void)
     ImGui::PopStyleVar(3);
 }
 
-static bool finish_loading_rom(void)
+static void select_save_slot(int slot)
+{
+    config_emulator.save_slot = slot;
+
+    char message[32];
+    snprintf(message, sizeof(message), "Save slot %d selected", slot + 1);
+    gui_notify(gui_NotificationInfo, ICON_MD_SAVE, message, NULL, "slot", gui_NotificationDurationShort);
+}
+
+static bool finish_started_content(bool load_symbols)
 {
     gui_debug_reset();
 
-    if (loading_symbol_path[0] != '\0')
-        gui_debug_load_symbols_file(loading_symbol_path);
-    else
+    if (load_symbols)
     {
-        std::string str(loading_rom_path);
-        str = str.substr(0, str.find_last_of("."));
-        if (!gui_debug_load_symbols_file((str + ".sym").c_str()))
-            gui_debug_load_symbols_file((str + ".noi").c_str());
+        if (loading_symbol_path[0] != '\0')
+            gui_debug_load_symbols_file(loading_symbol_path);
+        else
+        {
+            std::string str(loading_rom_path);
+            str = str.substr(0, str.find_last_of("."));
+            if (!gui_debug_load_symbols_file((str + ".sym").c_str()))
+                gui_debug_load_symbols_file((str + ".noi").c_str());
+        }
     }
 
     gui_debug_auto_load_settings();
@@ -693,10 +974,26 @@ static bool finish_loading_rom(void)
         }
     }
 
-    if (!emu_is_empty())
-        application_update_title_with_rom(emu_get_core()->GetCartridge()->GetFileName());
+    if (emu_get_machine() == GC_MACHINE_ADAM)
+        gui_adam_update_title();
+    else if (!emu_is_empty())
+    {
+        application_update_title_with_rom(emu_get_content_name());
+        gui_notify(gui_NotificationSuccess, ICON_MD_VIDEOGAME_ASSET, "ROM loaded", emu_get_content_name());
+    }
 
     return true;
+}
+
+static void load_pending_state(void)
+{
+    if (!pending_state_path.empty())
+        gui_action_load_state(pending_state_path.c_str());
+    else if (pending_state_slot > 0)
+        gui_action_load_state_slot(pending_state_slot);
+
+    pending_state_slot = 0;
+    pending_state_path.clear();
 }
 
 static void show_error_window(void)
@@ -707,8 +1004,7 @@ static void show_error_window(void)
         ImGui::OpenPopup("Error");
     }
 
-    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    gui_center_next_window();
     if (ImGui::BeginPopupModal("Error", NULL, ImGuiWindowFlags_AlwaysAutoResize))
     {
         ImGui::Text("%s\n\n", error_message);

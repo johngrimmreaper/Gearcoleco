@@ -224,6 +224,13 @@ inline bool parse_hex_with_prefix(const std::string& hex_str, T* result)
     return parse_hex_string(str, len, result);
 }
 
+inline std::string int_to_string(int value)
+{
+    char buffer[16];
+    snprintf(buffer, sizeof(buffer), "%d", value);
+    return buffer;
+}
+
 inline char* strncpy_fit(char* dest, const char* src, size_t dest_size)
 {
     if (dest_size == 0)
@@ -315,6 +322,19 @@ inline void open_ofstream_utf8(std::ofstream& stream, const char* path, std::ios
 
     stream.open(wpath.c_str(), mode);
 }
+
+inline bool rename_file_utf8(const char* from, const char* to)
+{
+    std::wstring wfrom = utf8_to_wstring(from);
+    std::wstring wto = utf8_to_wstring(to);
+    return MoveFileExW(wfrom.c_str(), wto.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+}
+
+inline bool remove_file_utf8(const char* path)
+{
+    std::wstring wpath = utf8_to_wstring(path);
+    return DeleteFileW(wpath.c_str()) != 0;
+}
 #else
 inline FILE* fopen_utf8(const char* path, const char* mode)
 {
@@ -329,6 +349,16 @@ inline void open_ifstream_utf8(std::ifstream& stream, const char* path, std::ios
 inline void open_ofstream_utf8(std::ofstream& stream, const char* path, std::ios_base::openmode mode = std::ios_base::out)
 {
     stream.open(path, mode);
+}
+
+inline bool rename_file_utf8(const char* from, const char* to)
+{
+    return rename(from, to) == 0;
+}
+
+inline bool remove_file_utf8(const char* path)
+{
+    return remove(path) == 0;
 }
 #endif
 

@@ -27,6 +27,7 @@
 #include "game_db.h"
 #include "common.h"
 #include "ips_patch.h"
+#include <utility>
 
 Cartridge::Cartridge()
 {
@@ -83,6 +84,28 @@ void Cartridge::Reset()
     m_softpatch_path[0] = 0;
     for (int j = 0; j < 0x400; j++)
         m_pEEPROM[j] = 0xFF;
+}
+
+void Cartridge::Swap(Cartridge& cartridge)
+{
+    std::swap(m_pROM, cartridge.m_pROM);
+    std::swap(m_iROMSize, cartridge.m_iROMSize);
+    std::swap(m_Type, cartridge.m_Type);
+    std::swap(m_bValidROM, cartridge.m_bValidROM);
+    std::swap(m_bReady, cartridge.m_bReady);
+    std::swap(m_bInGameDatabase, cartridge.m_bInGameDatabase);
+    std::swap(m_pGameDatabaseName, cartridge.m_pGameDatabaseName);
+    std::swap(m_szFilePath, cartridge.m_szFilePath);
+    std::swap(m_szFileName, cartridge.m_szFileName);
+    std::swap(m_szFileDirectory, cartridge.m_szFileDirectory);
+    std::swap(m_iROMBankCount, cartridge.m_iROMBankCount);
+    std::swap(m_bPAL, cartridge.m_bPAL);
+    std::swap(m_bF18ARequired, cartridge.m_bF18ARequired);
+    std::swap(m_iCRC, cartridge.m_iCRC);
+    std::swap(m_bSRAM, cartridge.m_bSRAM);
+    std::swap(m_pEEPROM, cartridge.m_pEEPROM);
+    std::swap(m_softpatch_applied, cartridge.m_softpatch_applied);
+    std::swap(m_softpatch_path, cartridge.m_softpatch_path);
 }
 
 u32 Cartridge::GetCRC() const
@@ -251,37 +274,23 @@ bool Cartridge::LoadFromZipFile(const u8* buffer, int size, bool softpatching)
     return false;
 }
 
-bool Cartridge::LoadFromFile(const char* path, bool softpatching)
+void Cartridge::SetFilePath(const char* path)
 {
-    using namespace std;
-
-    Log("Loading %s...", path);
-
-    Reset();
-
     strncpy_fit(m_szFilePath, path, sizeof(m_szFilePath));
 
     std::string pathstr(path);
     std::string filename;
-
     size_t pos = pathstr.find_last_of("\\");
     if (pos != std::string::npos)
-    {
         filename.assign(pathstr.begin() + pos + 1, pathstr.end());
-    }
     else
     {
         pos = pathstr.find_last_of("/");
         if (pos != std::string::npos)
-        {
             filename.assign(pathstr.begin() + pos + 1, pathstr.end());
-        }
         else
-        {
             filename = pathstr;
-        }
     }
-
     strncpy_fit(m_szFileName, filename.c_str(), sizeof(m_szFileName));
 
     std::string directory;
@@ -291,6 +300,25 @@ bool Cartridge::LoadFromFile(const char* path, bool softpatching)
     else
         directory = ".";
     strncpy_fit(m_szFileDirectory, directory.c_str(), sizeof(m_szFileDirectory));
+}
+
+bool Cartridge::LoadFromFile(const char* path, bool softpatching)
+{
+    using namespace std;
+
+    Log("Loading %s...", path);
+
+    Reset();
+    SetFilePath(path);
+
+    const char* dot = strrchr(m_szFileName, '.');
+
+    if (!IsValidPointer(dot) || (dot[1] == 0))
+    {
+        Error("ROM file has no extension: %s", path);
+        Reset();
+        return false;
+    }
 
     ifstream file;
     open_ifstream_utf8(file, path, ios::in | ios::binary | ios::ate);
@@ -363,27 +391,83 @@ bool Cartridge::LoadFromFile(const char* path, bool softpatching)
     return m_bReady;
 }
 
+bool Cartridge::IsValidROMBuffer(const u8* buffer, int size)
+{
+    if (!IsValidPointer(buffer) || (size <= 0))
+        return false;
+
+    u8 second = size > 1 ? buffer[1] : 0xFF;
+    u16 header = second | (buffer[0] << 8);
+
+    if ((header == 0xAA55) || (header == 0x55AA))
+        return true;
+
+    if (size > 0x8000)
+    {
+        int offset = size - 0x4000;
+        header = buffer[offset + 1] | (buffer[offset] << 8);
+
+        if ((header == 0xAA55) || (header == 0x55AA))
+            return true;
+    }
+
+    u32 crc = CalculateCRC32(0, buffer, size);
+
+    for (int i = 0; kGameDatabase[i].title != 0; i++)
+    {
+        if ((kGameDatabase[i].crc == crc) && (kGameDatabase[i].mode & GC_GameDBMode_OCM))
+            return true;
+    }
+
+    return false;
+}
+
+bool Cartridge::LoadFromBuffer(const u8* buffer, int size, const char* path,
+    bool softpatching)
+{
+    if (!IsValidPointer(buffer) || !IsValidPointer(path))
+        return false;
+
+    Reset();
+    SetFilePath(path);
+    m_bReady = LoadFromBufferWithSoftpatch(buffer, size, softpatching);
+
+    if (!m_bReady && m_softpatch_applied)
+    {
+        Error("Media rejected after applying IPS patch %s. Loading unpatched media.", m_softpatch_path);
+        Reset();
+        SetFilePath(path);
+        m_bReady = LoadFromBufferWithSoftpatch(buffer, size, false);
+    }
+
+    if (!m_bReady)
+        Reset();
+
+    return m_bReady;
+}
+
 bool Cartridge::LoadFromBufferWithSoftpatch(const u8* buffer, int size, bool softpatching)
 {
     u8* patched_buffer = NULL;
     int patched_size = 0;
     char patch_path[4096] = {};
-    bool patched = softpatching && ips_apply_patch(m_szFilePath, buffer, size,
-        &patched_buffer, &patched_size, patch_path, sizeof(patch_path));
-
+    bool patched = softpatching && ips_apply_patch(m_szFilePath, buffer, size, &patched_buffer, &patched_size, patch_path, sizeof(patch_path));
     bool loaded;
+
     if (patched)
         loaded = LoadFromBuffer(patched_buffer, patched_size);
     else
         loaded = LoadFromBuffer(buffer, size);
 
     m_softpatch_applied = patched;
+
     if (m_softpatch_applied)
         strncpy_fit(m_softpatch_path, patch_path, sizeof(m_softpatch_path));
     else
         m_softpatch_path[0] = 0;
 
     SafeDeleteArray(patched_buffer);
+
     return loaded;
 }
 
@@ -397,6 +481,14 @@ bool Cartridge::LoadFromBuffer(const u8* buffer, int size)
         {
             Log("Invalid size found. %d bytes", size);
             return false;
+        }
+
+        if ((size >= 4) && (buffer[0] == 'P') && (buffer[1] == 'K') &&
+            (((buffer[2] == 3) && (buffer[3] == 4)) ||
+            ((buffer[2] == 5) && (buffer[3] == 6)) ||
+            ((buffer[2] == 7) && (buffer[3] == 8))))
+        {
+            return LoadFromZipFile(buffer, size, false);
         }
 
         // Unkown size

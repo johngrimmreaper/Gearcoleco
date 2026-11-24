@@ -131,14 +131,12 @@ void gui_debug_window_f18a_nametables(void)
         for (int x = 0; x <= display_columns; x++)
         {
             float grid_x = position.x + (x * spacing_x);
-            draw_list->AddLine(ImVec2(grid_x, position.y),
-                ImVec2(grid_x, position.y + height), ImColor(dark_gray), 1.0f);
+            draw_list->AddLineV(grid_x, position.y, position.y + height, ImColor(dark_gray), 1.0f);
         }
         for (int y = 0; y <= rows; y++)
         {
             float grid_y = position.y + (y * spacing_y);
-            draw_list->AddLine(ImVec2(position.x, grid_y),
-                ImVec2(position.x + width, grid_y), ImColor(dark_gray), 1.0f);
+            draw_list->AddLineH(position.x, position.x + width, grid_y, ImColor(dark_gray), 1.0f);
         }
     }
 
@@ -177,20 +175,20 @@ void gui_debug_window_f18a_nametables(void)
                     position.y + (hovered_tile_y * spacing_y)),
                 ImVec2(position.x + ((hovered_tile_x + 1) * spacing_x),
                     position.y + ((hovered_tile_y + 1) * spacing_y)),
-                ImColor(cyan), 2.0f, ImDrawFlags_RoundCornersAll, 2.0f);
+                ImColor(cyan), 2.0f, 2.0f, ImDrawFlags_StrokeCenterBiased);
         }
     }
 
     if ((selected_tile_x >= 0) && (selected_tile_y >= 0))
     {
         float time = (float)(0.5 + 0.5 * sin(ImGui::GetTime() * 4.0));
-        ImVec4 pulse_color = gui_debug_lerp_color(red, white, time);
+        ImVec4 pulse_color = gui_lerp_color(red, white, time);
         draw_list->AddRect(
             ImVec2(position.x + (selected_tile_x * spacing_x),
                 position.y + (selected_tile_y * spacing_y)),
             ImVec2(position.x + ((selected_tile_x + 1) * spacing_x),
                 position.y + ((selected_tile_y + 1) * spacing_y)),
-            ImColor(pulse_color), 2.0f, ImDrawFlags_RoundCornersAll, 2.0f);
+            ImColor(pulse_color), 2.0f, 2.0f, ImDrawFlags_StrokeCenterBiased);
     }
 
     int tile_x = hovered_tile_x >= 0 ? hovered_tile_x : selected_tile_x;
@@ -307,14 +305,12 @@ void gui_debug_window_f18a_patterns(void)
         for (int x = 0; x <= 32; x++)
         {
             float grid_x = position.x + (x * spacing);
-            draw_list->AddLine(ImVec2(grid_x, position.y),
-                ImVec2(grid_x, position.y + height), ImColor(dark_gray), 1.0f);
+            draw_list->AddLineV(grid_x, position.y, position.y + height, ImColor(dark_gray), 1.0f);
         }
         for (int y = 0; y <= pattern_rows; y++)
         {
             float grid_y = position.y + (y * spacing);
-            draw_list->AddLine(ImVec2(position.x, grid_y),
-                ImVec2(position.x + width, grid_y), ImColor(dark_gray), 1.0f);
+            draw_list->AddLineH(position.x, position.x + width, grid_y, ImColor(dark_gray), 1.0f);
         }
     }
 
@@ -347,7 +343,7 @@ void gui_debug_window_f18a_patterns(void)
                 ImVec2(position.x + (tile_x * spacing), position.y + (tile_y * spacing)),
                 ImVec2(position.x + ((tile_x + 1) * spacing),
                     position.y + ((tile_y + 1) * spacing)),
-                ImColor(cyan), 2.0f, ImDrawFlags_RoundCornersAll, 2.0f);
+                ImColor(cyan), 2.0f, 2.0f, ImDrawFlags_StrokeCenterBiased);
         }
     }
 
@@ -356,12 +352,12 @@ void gui_debug_window_f18a_patterns(void)
         int tile_x = selected_pattern & 31;
         int tile_y = selected_pattern >> 5;
         float time = (float)(0.5 + 0.5 * sin(ImGui::GetTime() * 4.0));
-        ImVec4 pulse_color = gui_debug_lerp_color(red, white, time);
+        ImVec4 pulse_color = gui_lerp_color(red, white, time);
         draw_list->AddRect(
             ImVec2(position.x + (tile_x * spacing), position.y + (tile_y * spacing)),
             ImVec2(position.x + ((tile_x + 1) * spacing),
                 position.y + ((tile_y + 1) * spacing)),
-            ImColor(pulse_color), 2.0f, ImDrawFlags_RoundCornersAll, 2.0f);
+            ImColor(pulse_color), 2.0f, 2.0f, ImDrawFlags_StrokeCenterBiased);
     }
 
     int pattern = hovered_pattern >= 0 ? hovered_pattern : selected_pattern;
@@ -480,17 +476,17 @@ void gui_debug_window_f18a_sprites(void)
         {
             ImGui::GetWindowDrawList()->AddRect(position,
                 ImVec2(position.x + image_size, position.y + image_size), ImColor(cyan), 2.0f,
-                ImDrawFlags_RoundCornersAll, 3.0f);
+                3.0f, ImDrawFlags_StrokeCenterBiased);
         }
 
         if (selected_sprite == s)
         {
             float time = (float)(0.5 + 0.5 * sin(ImGui::GetTime() * 4.0));
-            ImVec4 pulse_color = gui_debug_lerp_color(red, white, time);
+            ImVec4 pulse_color = gui_lerp_color(red, white, time);
             ImGui::GetWindowDrawList()->AddRect(position,
                 ImVec2(position.x + image_size, position.y + image_size),
                 ImColor(pulse_color), 2.0f,
-                ImDrawFlags_RoundCornersAll, 3.0f);
+                3.0f, ImDrawFlags_StrokeCenterBiased);
         }
 
         ImGui::PopID();
@@ -547,10 +543,10 @@ void gui_debug_window_f18a_sprites(void)
         if ((rect_min_x < rect_max_x) && (rect_min_y < rect_max_y))
         {
             float time = (float)(0.5 + 0.5 * sin(ImGui::GetTime() * 4.0));
-            ImVec4 pulse_color = gui_debug_lerp_color(red, white, time);
+            ImVec4 pulse_color = gui_lerp_color(red, white, time);
             ImGui::GetWindowDrawList()->AddRect(ImVec2(rect_min_x, rect_min_y),
                 ImVec2(rect_max_x, rect_max_y), ImColor(pulse_color), 2.0f,
-                ImDrawFlags_RoundCornersAll, 2.0f);
+                2.0f, ImDrawFlags_StrokeCenterBiased);
         }
 
         int pattern = source_size == 16 ? (name & 0xFC) : name;

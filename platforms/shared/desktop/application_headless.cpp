@@ -26,6 +26,7 @@
 #include "gui.h"
 #include "gui_debug.h"
 #include "gui_debug_disassembler.h"
+#include "gui_debug_profiler.h"
 #include "log.h"
 
 static volatile bool headless_running = true;
@@ -62,7 +63,7 @@ int application_headless_init(const ApplicationParams& params)
     config_debug.debug = true;
 
     emu_set_video_chip(config_video.video_chip);
-    emu_set_overscan(0);
+    emu_set_overscan(config_debug.overscan);
     emu_audio_mute(true);
 
     gui_debug_init();
@@ -84,6 +85,12 @@ int application_headless_init(const ApplicationParams& params)
             Log("Symbol file argument: %s", params.symbol_file);
         gui_load_rom(params.rom_file, params.symbol_file);
     }
+    else if ((config_emulator.machine == GC_MACHINE_ADAM) && emu_are_adam_firmware_paths_valid())
+    {
+        Log("Starting configured no-content ADAM session");
+        if (!gui_start_adam())
+            Error("Unable to start configured no-content ADAM session");
+    }
 
     if (!rom_file_argument && symbol_file_argument)
     {
@@ -92,11 +99,16 @@ int application_headless_init(const ApplicationParams& params)
         gui_debug_load_symbols_file(params.symbol_file);
     }
 
+    if ((params.state_slot > 0) || IsValidPointer(params.state_file))
+        gui_load_state_after_media(params.state_slot, params.state_file);
+
     const char* mcp_http_address = params.mcp_http_address.empty() ? "127.0.0.1" : params.mcp_http_address.c_str();
+
     if (params.mcp_mode == 0)
         Log("Starting MCP server (mode: stdio)...");
     else
         Log("Starting MCP server (mode: http, address: %s, port: %d)...", mcp_http_address, params.mcp_tcp_port);
+
     emu_mcp_set_transport(params.mcp_mode, params.mcp_tcp_port, mcp_http_address);
     emu_mcp_start();
 
@@ -123,6 +135,7 @@ void application_headless_mainloop(void)
 
         emu_update();
         gui_debug_update();
+        gui_debug_profiler_update_headless();
         gui_finish_loading_rom();
 
         if (!emu_mcp_is_running())

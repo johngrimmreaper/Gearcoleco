@@ -18,13 +18,11 @@
  */
 
 #include "TMS9918A.h"
-#include "Memory.h"
 #include "Processor.h"
 #include "TraceLogger.h"
 
-TMS9918A::TMS9918A(Memory* pMemory, Processor* pProcessor)
+TMS9918A::TMS9918A(Processor* pProcessor)
 {
-    m_pMemory = pMemory;
     m_pProcessor = pProcessor;
     InitPointer(m_pTraceLogger);
     InitPointer(m_pInfoBuffer);
@@ -157,6 +155,89 @@ void TMS9918A::LogVDPEvent(u8 event, u8 reg, u8 raw, int sprite, int auxiliary)
 #endif
 }
 
+void TMS9918A::LogSpriteBudget(int line)
+{
+#if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
+    bool trace_budget = m_pTraceLogger->IsEventEnabled(TRACE_VDP, TRACE_VDP_SPRITE_BUDGET);
+    bool trace_limit = m_pTraceLogger->IsEventEnabled(TRACE_VDP, TRACE_VDP_SPRITE_LIMIT);
+
+    if (!trace_budget && !trace_limit)
+        return;
+
+    int requested = 0;
+    int sprite_size = IsSetBit(m_VdpRegister[1], 1) ? 16 : 8;
+
+    if (IsSetBit(m_VdpRegister[1], 0))
+        sprite_size *= 2;
+
+    for (int sprite = 0; sprite < GC_MAX_SPRITES; sprite++)
+    {
+        int sprite_y = m_SpriteAttribLatch[sprite << 2];
+
+        if (sprite_y == 0xD0)
+            break;
+
+        if (sprite_y > 0xE0)
+            sprite_y -= 0x100;
+
+        sprite_y++;
+
+        if ((sprite_y <= line) && ((sprite_y + sprite_size) > line))
+            requested++;
+    }
+
+    bool limit = requested > 4;
+
+    if (!trace_budget && !limit)
+        return;
+
+    GC_Trace_Entry e = {};
+    e.type = TRACE_VDP;
+    e.vdp.raw = 4;
+    e.vdp.effective = (u8)(m_bNoSpriteLimit ? requested : MIN(requested, 4));
+    e.vdp.mode = (u8)m_iMode;
+    e.vdp.line = (u16)line;
+    e.vdp.hpos = (u16)m_iCycleCounter;
+    e.vdp.auxiliary = (u16)requested;
+
+    if (trace_budget)
+    {
+        e.vdp.event = TRACE_VDP_SPRITE_BUDGET;
+        m_pTraceLogger->TraceLog(e);
+    }
+
+    if (trace_limit && limit)
+    {
+        e.vdp.event = TRACE_VDP_SPRITE_LIMIT;
+        m_pTraceLogger->TraceLog(e);
+    }
+#else
+    UNUSED(line);
+#endif
+}
+
+void TMS9918A::LogMissedVBlank()
+{
+#if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
+    u32 misses = m_pProcessor->UpdateVBlankWatch();
+
+    if (misses == 0)
+        return;
+
+    GC_Trace_Entry e = {};
+    e.type = TRACE_VDP;
+    e.vdp.event = TRACE_VDP_MISSED_VBLANK;
+    e.vdp.address = m_pProcessor->GetVBlankWatchAddress();
+    e.vdp.raw = (m_pProcessor->GetVBlankWatchAccess(true) ? 0x01 : 0x00) |
+        (m_pProcessor->GetVBlankWatchAccess(false) ? 0x02 : 0x00);
+    e.vdp.auxiliary = (u16)MIN(misses, 0xFFFFU);
+    e.vdp.mode = (u8)m_iMode;
+    e.vdp.line = (u16)m_iRenderLine;
+    e.vdp.hpos = (u16)m_iCycleCounter;
+    m_pTraceLogger->TraceLog(e);
+#endif
+}
+
 void TMS9918A::Reset(bool bPAL)
 {
     m_bPAL = bPAL;
@@ -211,6 +292,8 @@ bool TMS9918A::Tick(unsigned int clockCycles)
         if (!m_LineEvents.vint && (m_iCycleCounter >= m_Timing[TIMING_VINT]))
         {
             m_LineEvents.vint = true;
+
+            TraceMissedVBlank();
 
             if (IsSetBit(m_VdpRegister[1], 5) && !IsSetBit(m_VdpStatus, 7))
             {
@@ -292,18 +375,51 @@ void TMS9918A::WriteData(u8 data)
     m_VdpAddress = (m_VdpAddress + 1) & 0x3FFF;
 }
 
+void TMS9918A::RemapVRAM(bool memory16K)
+{
+    u8* remapped_vram = new u8[0x4000];
+
+    if (memory16K)
+    {
+        for (int address = 0; address < 0x4000; address += 0x40)
+        {
+            int mapped_address = (address & 0x203F) | ((address & 0x1000) >> 6) |
+                ((address & 0x0FC0) << 1);
+
+            for (int i = 0; i < 0x40; i++)
+                remapped_vram[mapped_address + i] = m_pVdpVRAM[address + i];
+        }
+    }
+    else
+    {
+        for (int address = 0; address < 0x4000; address += 0x40)
+        {
+            int mapped_address = (address & 0x203F) | ((address & 0x1000) >> 6) |
+                ((address & 0x0FC0) << 1);
+
+            for (int i = 0; i < 0x40; i++)
+                remapped_vram[address + i] = m_pVdpVRAM[mapped_address + i];
+        }
+    }
+
+    for (int i = 0; i < 0x4000; i++)
+        m_pVdpVRAM[i] = remapped_vram[i];
+
+    SafeDeleteArray(remapped_vram);
+}
+
 void TMS9918A::WriteControl(u8 control)
 {
     if (m_bFirstByteInSequence)
     {
         m_bFirstByteInSequence = false;
         m_VdpAddress = (m_VdpAddress & 0x3F00) | control;
-        m_VdpBuffer = control;
     }
     else
     {
         m_bFirstByteInSequence = true;
-        m_VdpAddress = ((control & 0x3F) << 8) | m_VdpBuffer;
+        u8 data = (u8)m_VdpAddress;
+        m_VdpAddress = ((control & 0x3F) << 8) | data;
 
         switch (control & 0xC0)
         {
@@ -314,11 +430,17 @@ void TMS9918A::WriteControl(u8 control)
                 break;
             }
             case 0x80:
+            case 0xC0:
             {
                 bool old_nmi = IsSetBit(m_VdpRegister[1], 5);
+                bool old_memory_16k = IsSetBit(m_VdpRegister[1], 7);
                 u8 masks[8] = { 0x03, 0xFB, 0x0F, 0xFF, 0x07, 0x7F, 0x07, 0xFF };
                 u8 reg = control & 0x07;
-                m_VdpRegister[reg] = m_VdpBuffer & masks[reg];
+                m_VdpRegister[reg] = data & masks[reg];
+
+                if ((reg == 1) && (old_memory_16k != IsSetBit(m_VdpRegister[1], 7)))
+                    RemapVRAM(IsSetBit(m_VdpRegister[1], 7));
+
                 if (reg < 2)
                 {
                     m_iMode = ((m_VdpRegister[1] & 0x08) >> 1) | (m_VdpRegister[0] & 0x02) |
@@ -327,12 +449,12 @@ void TMS9918A::WriteControl(u8 control)
 #if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
                 m_pProcessor->CheckMemoryBreakpoints(Processor::GC_BREAKPOINT_TYPE_VDP_REGISTER, reg, false);
 #endif
-                TraceVDPEvent(TRACE_VDP_REG_WRITE, reg, m_VdpBuffer);
+                TraceVDPEvent(TRACE_VDP_REG_WRITE, reg, data);
 
                 if ((reg == 1) && IsSetBit(m_VdpRegister[1], 5) && (!old_nmi) && IsSetBit(m_VdpStatus, 7))
                 {
                     m_pProcessor->RequestNMI();
-                    TraceVDPEvent(TRACE_VDP_NMI_REQUEST, reg, m_VdpBuffer, 0xFF, 1);
+                    TraceVDPEvent(TRACE_VDP_NMI_REQUEST, reg, data, 0xFF, 1);
                 }
 
                 break;
@@ -384,15 +506,18 @@ void TMS9918A::ScanLine(int line)
         {
             RenderBackground(line);
 
-            if (m_iMode != 0x01)
+            if ((m_iMode & 0x01) == 0)
+            {
                 RenderSprites(line);
+                TraceSpriteBudget(line);
+            }
         }
     }
     else
     {
         if (line < GC_RESOLUTION_HEIGHT)
         {
-            u16 color = m_VdpRegister[7] & 0x0F;
+            u16 color = ResolveBackdropColor();
             int line_width = line * GC_RESOLUTION_WIDTH;
 
             for (int scx = 0; scx < GC_RESOLUTION_WIDTH; scx++)
@@ -422,8 +547,7 @@ void TMS9918A::RenderBackground(int line)
     int pattern_table_addr = m_VdpRegister[4] << 11;
     int region_mask = ((m_VdpRegister[4] & 0x03) << 8) | 0xFF;
     int color_mask = ((m_VdpRegister[3] & 0x7F) << 3) | 0x07;
-    int backdrop_color = m_VdpRegister[7] & 0x0F;
-    backdrop_color = (backdrop_color > 0) ? backdrop_color : 1;
+    int backdrop_color = ResolveBackdropColor();
 
     int tile_y = line >> 3;
     int tile_y_offset = line & 7;
@@ -432,18 +556,30 @@ void TMS9918A::RenderBackground(int line)
     switch (m_iMode)
     {
         case 1:
+        case 3:
         {
+            if (m_iMode == 3)
+            {
+                pattern_table_addr &= 0x2000;
+                region = (tile_y & 0x18) << 5;
+            }
+
             int fg_color = (m_VdpRegister[7] >> 4) & 0x0F;
             int bg_color = backdrop_color;
             fg_color = (fg_color > 0) ? fg_color : backdrop_color;
 
-            for (int i = 0; i < 8; i++)
+            for (int i = 0; i < 6; i++)
             {
                 int pixel = line_offset + i;
                 m_pFrameBuffer[pixel] = bg_color;
-                m_pFrameBuffer[pixel + 248] = bg_color;
                 m_pInfoBuffer[pixel] = 0x00;
-                m_pInfoBuffer[pixel + 248] = 0x00;
+            }
+
+            for (int i = 0; i < 10; i++)
+            {
+                int pixel = line_offset + 246 + i;
+                m_pFrameBuffer[pixel] = bg_color;
+                m_pInfoBuffer[pixel] = 0x00;
             }
 
             for (int tile_x = 0; tile_x < 40; tile_x++)
@@ -451,9 +587,13 @@ void TMS9918A::RenderBackground(int line)
                 int tile_number = (tile_y * 40) + tile_x;
                 int name_tile_addr = name_table_addr + tile_number;
                 int name_tile = m_pVdpVRAM[name_tile_addr];
+
+                if (m_iMode == 3)
+                    name_tile = (name_tile + region) & region_mask;
+
                 u8 pattern_line = m_pVdpVRAM[pattern_table_addr + (name_tile << 3) + tile_y_offset];
 
-                int screen_offset = line_offset + (tile_x * 6) + 8;
+                int screen_offset = line_offset + (tile_x * 6) + 6;
 
                 for (int tile_pixel = 0; tile_pixel < 6; tile_pixel++)
                 {
@@ -473,7 +613,35 @@ void TMS9918A::RenderBackground(int line)
         }
         case 4:
         {
+            break;
+        }
+        case 5:
+        case 7:
+        {
+            int fg_color = (m_VdpRegister[7] >> 4) & 0x0F;
+            int bg_color = backdrop_color;
+            fg_color = (fg_color > 0) ? fg_color : backdrop_color;
+
+            for (int i = 0; i < GC_RESOLUTION_WIDTH; i++)
+            {
+                int pixel = line_offset + i;
+                m_pFrameBuffer[pixel] = bg_color;
+                m_pInfoBuffer[pixel] = 0x00;
+            }
+
+            for (int tile_x = 0; tile_x < 40; tile_x++)
+            {
+                int screen_offset = line_offset + (tile_x * 6) + 8;
+
+                for (int tile_pixel = 0; tile_pixel < 4; tile_pixel++)
+                    m_pFrameBuffer[screen_offset + tile_pixel] = fg_color;
+            }
+            return;
+        }
+        case 6:
+        {
             pattern_table_addr &= 0x2000;
+            region = (tile_y & 0x18) << 5;
             break;
         }
     }
@@ -486,9 +654,12 @@ void TMS9918A::RenderBackground(int line)
         u8 pattern_line = 0;
         u8 color_line = 0;
 
-        if (m_iMode == 4)
+        if ((m_iMode == 4) || (m_iMode == 6))
         {
-            int offset_color = pattern_table_addr + (name_tile << 3) + ((tile_y & 0x03) << 1) + (line & 0x04 ? 1 : 0);
+            if (m_iMode == 6)
+                name_tile = (name_tile + region) & region_mask;
+
+            int offset_color = pattern_table_addr + (name_tile << 3) + ((line >> 2) & 0x07);
             color_line = m_pVdpVRAM[offset_color];
 
             int left_color = color_line >> 4;
@@ -570,17 +741,19 @@ void TMS9918A::RenderSprites(int line)
     for (int sprite = 0; sprite <= max_sprite; sprite++)
     {
         int attrib_i = sprite << 2;
-        int sprite_y = (m_SpriteAttribLatch[attrib_i] + 1) & 0xFF;
+        int sprite_y = m_SpriteAttribLatch[attrib_i];
 
-        if (sprite_y >= 0xE0)
-            sprite_y = -(0x100 - sprite_y);
+        if (sprite_y > 0xE0)
+            sprite_y -= 0x100;
+
+        sprite_y++;
 
         if ((sprite_y > line) || ((sprite_y + sprite_size) <= line))
             continue;
 
         sprite_count++;
 
-        if (!IsSetBit(m_VdpStatus, 6) && (sprite_count > 4))
+        if (!IsSetBit(m_VdpStatus, 7) && !IsSetBit(m_VdpStatus, 6) && (sprite_count > 4))
         {
             TraceVDPEvent(TRACE_VDP_SPRITE_OVERFLOW, 0xFF, 0, sprite);
             m_VdpStatus = SetBit(m_VdpStatus, 6);
@@ -588,9 +761,7 @@ void TMS9918A::RenderSprites(int line)
         }
 
         int sprite_color = m_SpriteAttribLatch[attrib_i + 3] & 0x0F;
-
-        if (sprite_color == 0)
-            continue;
+        bool hardware_sprite = sprite_count < 5;
 
         int sprite_shift = (m_SpriteAttribLatch[attrib_i + 3] & 0x80) ? 32 : 0;
         int sprite_x = m_SpriteAttribLatch[attrib_i + 1] - sprite_shift;
@@ -624,27 +795,31 @@ void TMS9918A::RenderSprites(int line)
             else
                 sprite_pixel = IsSetBit(m_pVdpVRAM[sprite_line_addr + 16], 15 - tile_x_adjusted);
 
-            if (sprite_pixel && ((sprite_count < 5) || m_bNoSpriteLimit))
-            {
-                if (!IsSetBit(m_pInfoBuffer[pixel], 0) && (sprite_color > 0))
-                {
-                    m_pFrameBuffer[pixel] = sprite_color;
-                    m_pInfoBuffer[pixel] = SetBit(m_pInfoBuffer[pixel], 0);
-                }
+            if (!sprite_pixel)
+                continue;
 
-                if (IsSetBit(m_pInfoBuffer[pixel], 1))
+            if ((hardware_sprite || m_bNoSpriteLimit) &&
+                !IsSetBit(m_pInfoBuffer[pixel], 0) && (sprite_color > 0))
+            {
+                m_pFrameBuffer[pixel] = sprite_color;
+                m_pInfoBuffer[pixel] = SetBit(m_pInfoBuffer[pixel], 0);
+            }
+
+            if (!hardware_sprite)
+                continue;
+
+            if (IsSetBit(m_pInfoBuffer[pixel], 1))
+            {
+                if (!IsSetBit(m_VdpStatus, 5))
                 {
-                    if (!IsSetBit(m_VdpStatus, 5))
-                    {
-                        TraceVDPEvent(TRACE_VDP_SPRITE_COLLISION, 0xFF, 0,
-                            sprite, sprite_pixel_x);
-                        m_VdpStatus = SetBit(m_VdpStatus, 5);
-                    }
+                    TraceVDPEvent(TRACE_VDP_SPRITE_COLLISION, 0xFF, 0,
+                        sprite, sprite_pixel_x);
+                    m_VdpStatus = SetBit(m_VdpStatus, 5);
                 }
-                else
-                {
-                    m_pInfoBuffer[pixel] = SetBit(m_pInfoBuffer[pixel], 1);
-                }
+            }
+            else
+            {
+                m_pInfoBuffer[pixel] = SetBit(m_pInfoBuffer[pixel], 1);
             }
         }
     }
@@ -662,7 +837,7 @@ void TMS9918A::Render32bit(u16* srcFrameBuffer, u8* dstFrameBuffer, GC_Color_For
     int overscan_total_width = GC_RESOLUTION_WIDTH;
     int overscan_total_height = 0;
     bool overscan_enabled = false;
-    int overscan_color = (m_VdpRegister[7] & 0x0F) * 3;
+    int overscan_color = ResolveBackdropColor() * 3;
     int buffer_size = size * 4;
     bool bgr = (pixelFormat == GC_PIXEL_BGRA8888);
 
@@ -731,7 +906,7 @@ void TMS9918A::Render16bit(u16* srcFrameBuffer, u8* dstFrameBuffer, GC_Color_For
     int overscan_total_width = GC_RESOLUTION_WIDTH;
     int overscan_total_height = 0;
     bool overscan_enabled = false;
-    int overscan_color = m_VdpRegister[7] & 0x0F;
+    int overscan_color = ResolveBackdropColor();
     int buffer_size = size * 2;
     bool bgr = ((pixelFormat == GC_PIXEL_BGR555) || (pixelFormat == GC_PIXEL_BGR565));
     bool green_6bit = (pixelFormat == GC_PIXEL_RGB565) || (pixelFormat == GC_PIXEL_BGR565);
@@ -790,6 +965,67 @@ void TMS9918A::Render16bit(u16* srcFrameBuffer, u8* dstFrameBuffer, GC_Color_For
             src_color = srcFrameBuffer[i++];
 
         *(u16*)(&dstFrameBuffer[j]) = pal[src_color];
+    }
+}
+
+void TMS9918A::RenderIndices(u16* srcFrameBuffer, u8* dstIndexBuffer, int size, bool overscan)
+{
+    int x = 0;
+    int y = 0;
+    int overscan_h_l = 0;
+    int overscan_v = 0;
+    int overscan_content_v = 0;
+    int overscan_content_h = 0;
+    int overscan_total_width = GC_RESOLUTION_WIDTH;
+    int overscan_total_height = 0;
+    bool overscan_enabled = false;
+    u8 overscan_color = (u8)ResolveBackdropColor();
+
+    if (overscan && (m_Overscan != OverscanDisabled))
+    {
+        overscan_enabled = true;
+        overscan_content_v = GC_RESOLUTION_HEIGHT;
+        overscan_v = m_bPAL ? GC_RESOLUTION_OVERSCAN_V_PAL : GC_RESOLUTION_OVERSCAN_V;
+        overscan_total_height = overscan_content_v + (overscan_v * 2);
+    }
+
+    if (overscan && (m_Overscan == OverscanFull320))
+    {
+        overscan_content_h = GC_RESOLUTION_WIDTH;
+        overscan_h_l = GC_RESOLUTION_SMS_OVERSCAN_H_320_L;
+        overscan_total_width = overscan_content_h + overscan_h_l + GC_RESOLUTION_SMS_OVERSCAN_H_320_R;
+    }
+
+    if (overscan && (m_Overscan == OverscanFull284))
+    {
+        overscan_content_h = GC_RESOLUTION_WIDTH;
+        overscan_h_l = GC_RESOLUTION_SMS_OVERSCAN_H_284_L;
+        overscan_total_width = overscan_content_h + overscan_h_l + GC_RESOLUTION_SMS_OVERSCAN_H_284_R;
+    }
+
+    for (int i = 0, j = 0; j < size; j++)
+    {
+        if (overscan_enabled)
+        {
+            bool is_h_overscan = (overscan_h_l > 0) && (x < overscan_h_l || x >= (overscan_h_l + overscan_content_h));
+            bool is_v_overscan = (overscan_v > 0) && (y < overscan_v || y >= (overscan_v + overscan_content_v));
+
+            if (is_h_overscan || is_v_overscan)
+                dstIndexBuffer[j] = overscan_color;
+            else
+                dstIndexBuffer[j] = (u8)srcFrameBuffer[i++];
+
+            if (++x == overscan_total_width)
+            {
+                x = 0;
+                if (++y == overscan_total_height)
+                {
+                    y = 0;
+                }
+            }
+        }
+        else
+            dstIndexBuffer[j] = (u8)srcFrameBuffer[i++];
     }
 }
 
@@ -858,6 +1094,14 @@ void TMS9918A::SetOverscan(Overscan overscan)
 TMS9918A::Overscan TMS9918A::GetOverscan()
 {
     return m_Overscan;
+}
+
+void TMS9918A::GetBackdropColor(u8* rgb)
+{
+    int color = ResolveBackdropColor() * 3;
+    rgb[0] = m_pCurrentPalette[color];
+    rgb[1] = m_pCurrentPalette[color + 1];
+    rgb[2] = m_pCurrentPalette[color + 2];
 }
 
 void TMS9918A::SaveState(std::ostream& stream)

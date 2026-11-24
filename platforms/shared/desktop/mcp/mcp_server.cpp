@@ -63,7 +63,8 @@ static bool parse_mcp_hex_with_prefix(const std::string& hex_str, T* result)
 
 static bool file_exists(const std::string& path)
 {
-    std::ifstream file(path.c_str());
+    std::ifstream file;
+    open_ifstream_utf8(file, path.c_str(), std::ios::in);
     return file.good();
 }
 
@@ -353,15 +354,15 @@ void McpServer::HandleInitialize(const json& request)
         {"serverInfo", {
             {"name", "gearcoleco-mcp-server"},
             {"title", GEARCOLECO_TITLE " MCP Server"},
-            {"description", "Debug/control " GEARCOLECO_TITLE " ColecoVision: execution, breakpoints, memory, Z80 CPU, TMS9918 VDP, SN76489 PSG, AY-3-8910 SGM, disassembly, symbols, sprites, save states, rewind, keypad/input, screenshots."},
+            {"description", "Debug/control " GEARCOLECO_TITLE " ColecoVision and ADAM: execution, breakpoints, memory, Z80 CPU, TMS9918 VDP, audio, disassembly, symbols, media, save states, rewind, input, screenshots, and video recording."},
             {"version", GEARCOLECO_VERSION}
         }}
     };
 
     response["result"]["instructions"] =
-        "Use this server for ColecoVision and Super Game Module game debugging, reverse engineering, "
-        "memory inspection, Z80 tracing, breakpoints, VDP, PSG, AY-3-8910, sprites, save states, "
-        "rewind, input, and screenshots.";
+        "Use this server for ColecoVision, Super Game Module, and ADAM debugging, reverse engineering, "
+        "memory inspection, Z80 tracing, breakpoints, VDP, audio, media, save states, rewind, input, "
+        "screenshots, and video recording.";
 
     if (g_mcp_router_enabled)
     {
@@ -469,7 +470,7 @@ json McpServer::BuildToolList()
     tools.push_back({
         {"name", "debug_reset"},
         {"title", "Debug Reset"},
-        {"description", "Reset the emulated ColecoVision system."},
+        {"description", "Reset the active ColecoVision or ADAM machine."},
         {"annotations", {{"readOnlyHint", false}, {"destructiveHint", true}, {"idempotentHint", false}, {"openWorldHint", false}}},
         {"inputSchema", {
             {"type", "object"},
@@ -622,7 +623,7 @@ json McpServer::BuildToolList()
     tools.push_back({
         {"name", "list_memory_areas"},
         {"title", "List Memory Areas"},
-        {"description", "List memory spaces/tabs: WRAM, VRAM, ROM banks; returns area IDs, sizes, offsets."},
+        {"description", "List memory spaces available for the active machine, including ADAM CPU-mapped and physical RAM areas."},
         {"annotations", {{"readOnlyHint", true}, {"destructiveHint", false}, {"idempotentHint", true}, {"openWorldHint", false}}},
         {"inputSchema", {
             {"type", "object"},
@@ -741,8 +742,68 @@ json McpServer::BuildToolList()
     tools.push_back({
         {"name", "get_media_info"},
         {"title", "Get Media Info"},
-        {"description", "Read loaded ColecoVision ROM info: path, type, size, mapper."},
+        {"description", "Read active machine and content information, including ADAM firmware and media slots."},
         {"annotations", {{"readOnlyHint", true}, {"destructiveHint", false}, {"idempotentHint", true}, {"openWorldHint", false}}},
+        {"inputSchema", {
+            {"type", "object"},
+            {"properties", json::object()},
+            {"additionalProperties", false}
+        }}
+    });
+
+    tools.push_back({
+        {"name", "get_adam_status"},
+        {"title", "Get ADAM Status"},
+        {"description", "Read ADAM boot mode, firmware identity, MIOC/control latches, and the live eight-page CPU memory map."},
+        {"annotations", {{"readOnlyHint", true}, {"destructiveHint", false}, {"idempotentHint", true}, {"openWorldHint", false}}},
+        {"inputSchema", {
+            {"type", "object"},
+            {"properties", json::object()},
+            {"additionalProperties", false}
+        }}
+    });
+
+    tools.push_back({
+        {"name", "get_adamnet_status"},
+        {"title", "Get ADAMnet Status"},
+        {"description", "Read ADAMnet controller, PCB/DCB, active transfer, timing, and keyboard state."},
+        {"annotations", {{"readOnlyHint", true}, {"destructiveHint", false}, {"idempotentHint", true}, {"openWorldHint", false}}},
+        {"inputSchema", {
+            {"type", "object"},
+            {"properties", json::object()},
+            {"additionalProperties", false}
+        }}
+    });
+
+    tools.push_back({
+        {"name", "list_adam_media"},
+        {"title", "List ADAM Media"},
+        {"description", "List all four ADAM core media slots with geometry, position, cache, generation, dirty state, and desktop persistence paths."},
+        {"annotations", {{"readOnlyHint", true}, {"destructiveHint", false}, {"idempotentHint", true}, {"openWorldHint", false}}},
+        {"inputSchema", {
+            {"type", "object"},
+            {"properties", json::object()},
+            {"additionalProperties", false}
+        }}
+    });
+
+    tools.push_back({
+        {"name", "get_adam_printer_output"},
+        {"title", "Get ADAM Printer Output"},
+        {"description", "Read the captured ADAM printer spool as text and hexadecimal bytes."},
+        {"annotations", {{"readOnlyHint", true}, {"destructiveHint", false}, {"idempotentHint", true}, {"openWorldHint", false}}},
+        {"inputSchema", {
+            {"type", "object"},
+            {"properties", json::object()},
+            {"additionalProperties", false}
+        }}
+    });
+
+    tools.push_back({
+        {"name", "clear_adam_printer_output"},
+        {"title", "Clear ADAM Printer Output"},
+        {"description", "Clear the captured ADAM printer spool."},
+        {"annotations", {{"readOnlyHint", false}, {"destructiveHint", true}, {"idempotentHint", true}, {"openWorldHint", false}}},
         {"inputSchema", {
             {"type", "object"},
             {"properties", json::object()},
@@ -753,7 +814,7 @@ json McpServer::BuildToolList()
     tools.push_back({
         {"name", "list_recent_media"},
         {"title", "List Recent Media"},
-        {"description", "List recent ROMs with file_path values for load_media."},
+        {"description", "List recent cartridge or ADAM media paths for load_media."},
         {"annotations", {{"readOnlyHint", true}, {"destructiveHint", false}, {"idempotentHint", true}, {"openWorldHint", false}}},
         {"inputSchema", {
             {"type", "object"},
@@ -835,18 +896,97 @@ json McpServer::BuildToolList()
         }}
     });
 
-    // Media and state management tools
     tools.push_back({
-        {"name", "load_media"},
-        {"title", "Load Media"},
-        {"description", "Load ROM media (.col .cv .rom .bin .zip); reset emulator and auto-load symbols. Debugger state may be lost unless saved debugger settings are enabled."},
+        {"name", "start_video_recording"},
+        {"title", "Start Video Recording"},
+        {"description", "Start recording emulated video and audio to an AVI file (MJPEG or uncompressed video, PCM audio). The file is written to disk only; its path is returned. Options given here update the recording settings, same as the GUI menu."},
         {"annotations", {{"readOnlyHint", false}, {"destructiveHint", true}, {"idempotentHint", false}, {"openWorldHint", true}}},
         {"inputSchema", {
             {"type", "object"},
             {"properties", {
                 {"file_path", {
                     {"type", "string"},
-                    {"description", "Absolute ROM file path."}
+                    {"description", "Absolute destination .avi file path. If omitted, an automatic name is used in the configured video recordings directory."}
+                }},
+                {"scale", {
+                    {"type", "integer"},
+                    {"description", "Output height multiplier (1-20)."},
+                    {"minimum", 1},
+                    {"maximum", 20}
+                }},
+                {"aspect_ratio", {
+                    {"type", "string"},
+                    {"description", "Output aspect ratio. screen follows the current display settings (square pixels while debugging)."},
+                    {"enum", json::array({"screen", "square", "4:3", "16:9", "16:10"})}
+                }},
+                {"quality", {
+                    {"type", "string"},
+                    {"description", "low and medium halve color resolution; lossless writes uncompressed video with very large files; lossless_compressed stores PNG frames, much smaller but needs an FFmpeg based player."},
+                    {"enum", json::array({"low", "medium", "high", "lossless", "lossless_compressed"})}
+                }}
+            }},
+            {"additionalProperties", false}
+        }}
+    });
+
+    tools.push_back({
+        {"name", "stop_video_recording"},
+        {"title", "Stop Video Recording"},
+        {"description", "Stop the active video recording and finalize the AVI file. Returns the file path and recorded frame count."},
+        {"annotations", {{"readOnlyHint", false}, {"destructiveHint", false}, {"idempotentHint", false}, {"openWorldHint", true}}},
+        {"inputSchema", {
+            {"type", "object"},
+            {"properties", json::object()},
+            {"additionalProperties", false}
+        }}
+    });
+
+    // Media and state management tools
+    tools.push_back({
+        {"name", "start_adam"},
+        {"title", "Start ADAM"},
+        {"description", "Start a no-content ADAM SmartWriter session using configured OS-7, EOS, and SmartWriter firmware."},
+        {"annotations", {{"readOnlyHint", false}, {"destructiveHint", true}, {"idempotentHint", false}, {"openWorldHint", false}}},
+        {"inputSchema", {
+            {"type", "object"},
+            {"properties", json::object()},
+            {"additionalProperties", false}
+        }}
+    });
+
+    tools.push_back({
+        {"name", "load_media"},
+        {"title", "Load Media"},
+        {"description", "Load cartridge or ADAM media (.col .cv .rom .bin .zip .ddp .dsk .m3u); reset the machine and auto-load symbols where applicable."},
+        {"annotations", {{"readOnlyHint", false}, {"destructiveHint", true}, {"idempotentHint", false}, {"openWorldHint", true}}},
+        {"inputSchema", {
+            {"type", "object"},
+            {"properties", {
+                {"file_path", {
+                    {"type", "string"},
+                    {"description", "Absolute cartridge or ADAM media file path."}
+                }}
+            }},
+            {"required", json::array({"file_path"})}
+        }}
+    });
+
+    tools.push_back({
+        {"name", "load_bios"},
+        {"title", "Load BIOS"},
+        {"description", "Load ColecoVision OS-7 BIOS (8KB) or ADAM EOS (8KB) / SmartWriter (32KB) firmware and save its path; a running ADAM uses it on next power-on."},
+        {"annotations", {{"readOnlyHint", false}, {"destructiveHint", true}, {"idempotentHint", false}, {"openWorldHint", true}}},
+        {"inputSchema", {
+            {"type", "object"},
+            {"properties", {
+                {"file_path", {
+                    {"type", "string"},
+                    {"description", "Absolute BIOS or firmware file path."}
+                }},
+                {"type", {
+                    {"type", "string"},
+                    {"enum", json::array({"os7", "eos", "smartwriter"})},
+                    {"description", "Firmware type: os7 (ColecoVision BIOS), eos, or smartwriter. Default os7."}
                 }}
             }},
             {"required", json::array({"file_path"})}
@@ -1110,6 +1250,127 @@ json McpServer::BuildToolList()
                 }}
             }},
             {"required", json::array({"commands"})},
+            {"additionalProperties", false}
+        }}
+    });
+
+    tools.push_back({
+        {"name", "adam_keyboard"},
+        {"title", "ADAM Keyboard"},
+        {"description", "Press, release, or tap a semantic Coleco ADAM keyboard key."},
+        {"annotations", {{"readOnlyHint", false}, {"destructiveHint", true}, {"idempotentHint", false}, {"openWorldHint", false}}},
+        {"inputSchema", {
+            {"type", "object"},
+            {"properties", {
+                {"key", {
+                    {"type", "string"},
+                    {"description", "ADAM key: a-z, 0-9, punctuation names, editing keys, SmartKeys, directions, or modifiers."},
+                    {"enum", json::array({"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "space", "minus", "plus", "caret", "semicolon", "quote", "open_bracket", "close_bracket", "backslash", "comma", "period", "slash", "return", "enter", "escape", "esc", "backspace", "tab", "home", "smart_1", "smart_2", "smart_3", "smart_4", "smart_5", "smart_6", "wild_card", "undo", "move", "store", "insert", "print", "clear", "delete", "up", "right", "down", "left", "shift", "control", "ctrl", "lock"})}
+                }},
+                {"action", {
+                    {"type", "string"},
+                    {"description", "Keyboard action."},
+                    {"enum", json::array({"press", "release", "tap"})}
+                }}
+            }},
+            {"required", json::array({"key", "action"})},
+            {"additionalProperties", false}
+        }}
+    });
+
+    tools.push_back({
+        {"name", "get_key_map"},
+        {"title", "Get Key Map"},
+        {"description", "The host key map of the running ADAM: whether mapping is on, whether the keyboard mapper is "
+            "open, the per-game file, the user's bindings, every host key that doesn't drive its built-in key, and the "
+            "ADAM keys no host key reaches. Host keys are USB HID key names."},
+        {"annotations", {{"readOnlyHint", true}, {"destructiveHint", false}, {"idempotentHint", true}, {"openWorldHint", false}}},
+        {"inputSchema", {
+            {"type", "object"},
+            {"properties", json::object()},
+            {"additionalProperties", false}
+        }}
+    });
+
+    tools.push_back({
+        {"name", "set_key_binding"},
+        {"title", "Set Key Binding"},
+        {"description", "Bind a host key to ADAM keys for this game, saved to its .keys file, as the keyboard mapper "
+            "does. keys: one key, up to 4 joined with '+', 'none', or 'default' to drop the user's binding."},
+        {"annotations", {{"readOnlyHint", false}, {"destructiveHint", true}, {"idempotentHint", true}, {"openWorldHint", false}}},
+        {"inputSchema", {
+            {"type", "object"},
+            {"properties", {
+                {"host", {
+                    {"type", "string"},
+                    {"description", "Host key name, e.g. up, w, f13, right_gui, kp_8."}
+                }},
+                {"keys", {
+                    {"type", "string"},
+                    {"description", "ADAM key names, e.g. smart_1, wild_card, control + c, none, default."}
+                }}
+            }},
+            {"required", json::array({"host", "keys"})}
+        }}
+    });
+
+    tools.push_back({
+        {"name", "set_key_mapping"},
+        {"title", "Set Key Mapping"},
+        {"description", "Turn the game's key mapping on or off. Off, every host key types its built-in key."},
+        {"annotations", {{"readOnlyHint", false}, {"destructiveHint", false}, {"idempotentHint", true}, {"openWorldHint", false}}},
+        {"inputSchema", {
+            {"type", "object"},
+            {"properties", {
+                {"enabled", {{"type", "boolean"}}}
+            }},
+            {"required", json::array({"enabled"})}
+        }}
+    });
+
+    tools.push_back({
+        {"name", "host_key"},
+        {"title", "Host Key"},
+        {"description", "Press, release or tap a host key through the key map, as the host keyboard would. While "
+            "the keyboard mapper is open it goes to the mapper instead."},
+        {"annotations", {{"readOnlyHint", false}, {"destructiveHint", true}, {"idempotentHint", false}, {"openWorldHint", false}}},
+        {"inputSchema", {
+            {"type", "object"},
+            {"properties", {
+                {"key", {
+                    {"type", "string"},
+                    {"description", "Host key name, e.g. a, up, kp_8, left_ctrl, f13."}
+                }},
+                {"action", {
+                    {"type", "string"},
+                    {"description", "press_and_release releases after some frames."},
+                    {"enum", json::array({"press", "release", "press_and_release"})}
+                }}
+            }},
+            {"required", json::array({"key", "action"})}
+        }}
+    });
+
+    tools.push_back({
+        {"name", "open_key_mapper"},
+        {"title", "Open Key Mapper"},
+        {"description", "Open the full screen keyboard mapper. ADAM stops until it closes."},
+        {"annotations", {{"readOnlyHint", false}, {"destructiveHint", false}, {"idempotentHint", true}, {"openWorldHint", false}}},
+        {"inputSchema", {
+            {"type", "object"},
+            {"properties", json::object()},
+            {"additionalProperties", false}
+        }}
+    });
+
+    tools.push_back({
+        {"name", "close_key_mapper"},
+        {"title", "Close Key Mapper"},
+        {"description", "Close the keyboard mapper, saving the game's bindings."},
+        {"annotations", {{"readOnlyHint", false}, {"destructiveHint", false}, {"idempotentHint", true}, {"openWorldHint", false}}},
+        {"inputSchema", {
+            {"type", "object"},
+            {"properties", json::object()},
             {"additionalProperties", false}
         }}
     });
@@ -1623,7 +1884,8 @@ json McpServer::BuildToolList()
     tools.push_back({
         {"name", "get_trace_log"},
         {"title", "Get Trace Log"},
-        {"description", "Read formatted trace lines using absolute sequence pagination."},
+        {"description", "Read formatted trace lines using absolute sequence pagination. enabled says whether it records; "
+            "after a reset or media change stopped it, stopped_by says which."},
         {"annotations", {{"readOnlyHint", true}, {"destructiveHint", false}, {"idempotentHint", true}, {"openWorldHint", false}}},
         {"inputSchema", {
             {"type", "object"},
@@ -1646,7 +1908,8 @@ json McpServer::BuildToolList()
     tools.push_back({
         {"name", "set_trace_log"},
         {"title", "Set Trace Log"},
-        {"description", "Configure memory or disk trace capture with exact event filters."},
+        {"description", "Configure memory or disk trace capture with exact event filters. "
+            "A reset or media change stops it."},
         {"annotations", {{"readOnlyHint", false}, {"destructiveHint", true}, {"idempotentHint", true}, {"openWorldHint", false}}},
         {"inputSchema", {
             {"type", "object"},
@@ -1671,6 +1934,15 @@ json McpServer::BuildToolList()
                     {"type", "string"},
                     {"description", "Output directory for disk capture."}
                 }},
+                {"vblank_watch_address", {
+                    {"type", "string"},
+                    {"description", "CPU address hex watched by vdp.missed_vblank: '7000', '0x7000', or '$7000'. Omit to keep current."}
+                }},
+                {"vblank_watch_operation", {
+                    {"type", "string"},
+                    {"description", "Access that marks a frame as on time for vdp.missed_vblank. Omit to keep current."},
+                    {"enum", json::array({"read", "write", "read_write"})}
+                }},
                 {"filters", {
                     {"type", "array"},
                     {"minItems", 1},
@@ -1679,16 +1951,65 @@ json McpServer::BuildToolList()
                         {"type", "string"},
                         {"enum", json::array({
                             "cpu.instructions", "cpu.interrupts",
-                            "vdp.registers", "vdp.interrupts", "vdp.status", "vdp.sprites", "vdp.timing", "vdp.vram",
+                            "vdp.registers", "vdp.interrupts", "vdp.status", "vdp.sprites", "vdp.sprite_budget", "vdp.sprite_limit", "vdp.missed_vblank",
+                            "vdp.timing", "vdp.vram",
                             "psg.tone", "psg.volume", "psg.noise",
                             "ay8910.registers", "ay8910.tone", "ay8910.noise_mixer", "ay8910.volume", "ay8910.envelope", "ay8910.io",
                             "io.reads", "io.writes", "input.reads", "input.writes", "sgm.control",
+                            "adam.map", "adam.commands", "adam.dma", "adam.errors",
                             "mapper.banks", "mapper.eeprom", "mapper.sram"
                         })}
                     }}
                 }}
             }},
             {"required", json::array({"enabled"})}
+        }}
+    });
+
+    tools.push_back({
+        {"name", "set_profiler"},
+        {"title", "Set Profiler"},
+        {"description", "Start (opens the Profiler window), stop (closes it), or reset the function profiler. Collects only while the window is visible."},
+        {"annotations", {{"readOnlyHint", false}, {"destructiveHint", true}, {"idempotentHint", true}, {"openWorldHint", false}}},
+        {"inputSchema", {
+            {"type", "object"},
+            {"properties", {
+                {"action", {
+                    {"type", "string"},
+                    {"description", "start opens the window and resumes collection; stop closes the window; reset clears collected data."},
+                    {"enum", json::array({"start", "stop", "reset"})}
+                }}
+            }},
+            {"required", json::array({"action"})},
+            {"additionalProperties", false}
+        }}
+    });
+
+    tools.push_back({
+        {"name", "get_profiler_data"},
+        {"title", "Get Profiler Data"},
+        {"description", "Read function profiler results: totals plus per-function symbol, address, bank, calls, calls per frame, inclusive/exclusive cycles and percentages, and avg/min/max cycles per call."},
+        {"annotations", {{"readOnlyHint", true}, {"destructiveHint", false}, {"idempotentHint", true}, {"openWorldHint", false}}},
+        {"inputSchema", {
+            {"type", "object"},
+            {"properties", {
+                {"sort", {
+                    {"type", "string"},
+                    {"description", "Sort order, highest first (default inclusive)."},
+                    {"enum", json::array({"inclusive", "exclusive", "calls", "average", "max"})}
+                }},
+                {"count", {
+                    {"type", "integer"},
+                    {"description", "Functions to return (default 50, max 1000)"},
+                    {"minimum", 1},
+                    {"maximum", 1000}
+                }},
+                {"filter", {
+                    {"type", "string"},
+                    {"description", "Case-insensitive substring matched against function name or hex address."}
+                }}
+            }},
+            {"additionalProperties", false}
         }}
     });
 
@@ -2287,8 +2608,12 @@ json McpServer::ExecuteCommand(const std::string& toolName, const json& argument
             data.push_back(byte);
         }
 
-        m_debugAdapter.WriteMemoryArea(area, offset, data);
-        return {{"success", true}, {"area", area}, {"offset", offsetStr}, {"bytes_written", data.size()}};
+        size_t written = m_debugAdapter.WriteMemoryArea(area, offset, data);
+        if (written != data.size())
+            return {{"error", "Memory area is unavailable, out of range, or read-only"},
+                {"bytes_written", written}};
+        return {{"success", true}, {"area", area}, {"offset", offsetStr},
+            {"bytes_written", written}};
     }
     // Registers
     else if (normalizedTool == "write_z80_register")
@@ -2422,6 +2747,26 @@ json McpServer::ExecuteCommand(const std::string& toolName, const json& argument
     {
         return m_debugAdapter.GetMediaInfo();
     }
+    else if (normalizedTool == "get_adam_status")
+    {
+        return m_debugAdapter.GetAdamStatus();
+    }
+    else if (normalizedTool == "get_adamnet_status")
+    {
+        return m_debugAdapter.GetAdamNetStatus();
+    }
+    else if (normalizedTool == "list_adam_media")
+    {
+        return m_debugAdapter.ListAdamMedia();
+    }
+    else if (normalizedTool == "get_adam_printer_output")
+    {
+        return m_debugAdapter.GetAdamPrinterOutput();
+    }
+    else if (normalizedTool == "clear_adam_printer_output")
+    {
+        return m_debugAdapter.ClearAdamPrinterOutput();
+    }
     else if (normalizedTool == "list_recent_media")
     {
         return m_debugAdapter.ListRecentMedia();
@@ -2451,10 +2796,38 @@ json McpServer::ExecuteCommand(const std::string& toolName, const json& argument
     {
         return m_debugAdapter.GetScreenshot();
     }
+    else if (normalizedTool == "start_video_recording")
+    {
+        std::string file_path = arguments.value("file_path", "");
+        int scale = arguments.value("scale", 0);
+        std::string aspect_ratio = arguments.value("aspect_ratio", "");
+        std::string quality = arguments.value("quality", "");
+        return m_debugAdapter.StartVideoRecording(file_path, scale, aspect_ratio, quality);
+    }
+    else if (normalizedTool == "stop_video_recording")
+    {
+        return m_debugAdapter.StopVideoRecording();
+    }
     // Media and state management
+    else if (normalizedTool == "start_adam")
+    {
+        return m_debugAdapter.StartAdam();
+    }
     else if (normalizedTool == "load_media")
     {
         return {{"error", "load_media must be handled by the MCP manager"}};
+    }
+    else if (normalizedTool == "load_bios")
+    {
+        std::string file_path = arguments["file_path"];
+        std::string type = arguments.value("type", "os7");
+        if (type == "os7")
+            return m_debugAdapter.LoadBios(file_path, GC_ADAM_FIRMWARE_OS7);
+        if (type == "eos")
+            return m_debugAdapter.LoadBios(file_path, GC_ADAM_FIRMWARE_EOS);
+        if (type == "smartwriter")
+            return m_debugAdapter.LoadBios(file_path, GC_ADAM_FIRMWARE_SMARTWRITER);
+        return {{"error", "Invalid type (must be os7, eos, or smartwriter)"}};
     }
     else if (normalizedTool == "load_symbols")
     {
@@ -2519,6 +2892,36 @@ json McpServer::ExecuteCommand(const std::string& toolName, const json& argument
         std::string button = arguments["button"];
         std::string action = arguments["action"];
         return m_debugAdapter.ControllerButton(player, button, action);
+    }
+    else if (normalizedTool == "adam_keyboard")
+    {
+        std::string key = arguments["key"];
+        std::string action = arguments["action"];
+        return m_debugAdapter.AdamKeyboard(key, action);
+    }
+    else if (normalizedTool == "get_key_map")
+    {
+        return m_debugAdapter.GetKeyMap();
+    }
+    else if (normalizedTool == "set_key_binding")
+    {
+        return m_debugAdapter.SetKeyBinding(arguments["host"], arguments["keys"]);
+    }
+    else if (normalizedTool == "set_key_mapping")
+    {
+        return m_debugAdapter.SetKeyMapping(arguments["enabled"]);
+    }
+    else if (normalizedTool == "host_key")
+    {
+        return m_debugAdapter.HostKey(arguments["key"], arguments["action"]);
+    }
+    else if (normalizedTool == "open_key_mapper")
+    {
+        return m_debugAdapter.SetKeyMapperOpen(true);
+    }
+    else if (normalizedTool == "close_key_mapper")
+    {
+        return m_debugAdapter.SetKeyMapperOpen(false);
     }
     else if (normalizedTool == "get_input_state")
     {
@@ -2741,6 +3144,18 @@ json McpServer::ExecuteCommand(const std::string& toolName, const json& argument
     {
         return m_debugAdapter.SetTraceLog(arguments);
     }
+    else if (normalizedTool == "set_profiler")
+    {
+        std::string action = arguments["action"];
+        return m_debugAdapter.SetProfiler(action);
+    }
+    else if (normalizedTool == "get_profiler_data")
+    {
+        std::string sort = arguments.value("sort", "inclusive");
+        int count = arguments.value("count", 50);
+        std::string filter = arguments.value("filter", "");
+        return m_debugAdapter.GetProfilerData(sort, count, filter);
+    }
     else
     {
         return {{"error", "Unknown tool: " + toolName}};
@@ -2807,7 +3222,8 @@ static bool IsValidResourceName(const std::string& name)
 
 void McpServer::LoadResourcesFromCategory(const std::string& category, const std::string& tocPath)
 {
-    std::ifstream file(tocPath);
+    std::ifstream file;
+    open_ifstream_utf8(file, tocPath.c_str(), std::ios::in);
     if (!file.is_open())
     {
         Log("[MCP] Warning: Resources TOC file not found: %s", tocPath.c_str());
@@ -2883,7 +3299,8 @@ void McpServer::LoadResourcesFromCategory(const std::string& category, const std
 bool McpServer::ReadFileContents(const std::string& filePath, std::string& content)
 {
     content.clear();
-    std::ifstream file(filePath, std::ios::binary | std::ios::ate);
+    std::ifstream file;
+    open_ifstream_utf8(file, filePath.c_str(), std::ios::in | std::ios::binary | std::ios::ate);
     if (!file.is_open())
     {
         Log("[MCP] Warning: Failed to open resource file: %s", filePath.c_str());

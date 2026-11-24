@@ -23,7 +23,6 @@
 #include "Video.h"
 #include "F18AGPU.h"
 
-class Memory;
 class Processor;
 class TraceLogger;
 
@@ -47,7 +46,7 @@ struct F18ADebugTileInfo
 class F18A : public Video
 {
 public:
-    F18A(Memory* pMemory, Processor* pProcessor);
+    F18A(Processor* pProcessor);
     ~F18A();
     void Init();
     void Reset(bool bPAL);
@@ -64,8 +63,10 @@ public:
     int GetMode();
     void Render32bit(u16* srcFrameBuffer, u8* dstFrameBuffer, GC_Color_Format pixelFormat, int size, bool overscan = false);
     void Render16bit(u16* srcFrameBuffer, u8* dstFrameBuffer, GC_Color_Format pixelFormat, int size, bool overscan = false);
+    void RenderIndices(u16* srcFrameBuffer, u8* dstIndexBuffer, int size, bool overscan = false);
     void SetOverscan(Overscan overscan);
     Overscan GetOverscan();
+    void GetBackdropColor(u8* rgb);
     void SetCustomPalette(GC_Color* palette);
     void SetPredefinedPalette(int palette);
     void SetNoSpriteLimit(bool noSpriteLimit);
@@ -99,6 +100,10 @@ private:
     INLINE void TraceVDPEvent(u8 event, u8 reg = 0xFF, u8 raw = 0,
         int sprite = 0xFF, int auxiliary = 0);
     void LogVDPEvent(u8 event, u8 reg, u8 raw, int sprite, int auxiliary);
+    INLINE void TraceSpriteBudget(int line, bool enhanced);
+    void LogSpriteBudget(int line, bool enhanced);
+    INLINE void TraceMissedVBlank();
+    void LogMissedVBlank();
     void ScanLine(int line);
     void LatchSpriteAttributes();
     void RenderBackground(int line);
@@ -150,7 +155,6 @@ private:
     };
 
 private:
-    Memory* m_pMemory;
     Processor* m_pProcessor;
     TraceLogger* m_pTraceLogger;
     u8* m_pInfoBuffer;
@@ -240,6 +244,18 @@ INLINE void F18A::TraceVDPEvent(u8 event, u8 reg, u8 raw, int sprite, int auxili
 {
     if (IsValidPointer(m_pTraceLogger) && m_pTraceLogger->IsEventEnabled(TRACE_VDP, event))
         LogVDPEvent(event, reg, raw, sprite, auxiliary);
+}
+
+INLINE void F18A::TraceSpriteBudget(int line, bool enhanced)
+{
+    if (IsValidPointer(m_pTraceLogger) && m_pTraceLogger->IsEnabled(TRACE_VDP))
+        LogSpriteBudget(line, enhanced);
+}
+
+INLINE void F18A::TraceMissedVBlank()
+{
+    if (IsValidPointer(m_pTraceLogger) && m_pTraceLogger->IsEventEnabled(TRACE_VDP, TRACE_VDP_MISSED_VBLANK))
+        LogMissedVBlank();
 }
 
 inline u8* F18A::GetVRAM()

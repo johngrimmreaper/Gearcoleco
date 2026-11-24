@@ -20,22 +20,26 @@
 #ifndef GUI_FILEDIALOGS_H
 #define GUI_FILEDIALOGS_H
 
+#include "definitions.h"
+
 #ifdef GUI_FILEDIALOGS_IMPORT
     #define EXTERN
 #else
     #define EXTERN extern
 #endif
 
-EXTERN void gui_file_dialog_open_rom(void);
+EXTERN void gui_file_dialog_open_rom(bool adam_cartridge = false);
 EXTERN void gui_file_dialog_load_ram(void);
 EXTERN void gui_file_dialog_save_ram(void);
 EXTERN void gui_file_dialog_load_state(void);
 EXTERN void gui_file_dialog_save_state(void);
 EXTERN void gui_file_dialog_choose_savestate_path(void);
 EXTERN void gui_file_dialog_choose_screenshot_path(void);
+EXTERN void gui_file_dialog_choose_video_recording_path(void);
 EXTERN void gui_file_dialog_load_symbols(void);
 EXTERN void gui_file_dialog_save_screenshot(void);
 EXTERN void gui_file_dialog_save_vgm(void);
+EXTERN void gui_file_dialog_save_video(void);
 EXTERN void gui_file_dialog_save_sprite(int index);
 EXTERN void gui_file_dialog_save_all_sprites(void);
 EXTERN void gui_file_dialog_save_background(void);
@@ -49,6 +53,10 @@ EXTERN void gui_file_dialog_load_debug_settings(void);
 EXTERN void gui_file_dialog_choose_saves_path(void);
 EXTERN void gui_file_dialog_choose_trace_path(void);
 EXTERN void gui_file_dialog_load_bios(void);
+EXTERN void gui_file_dialog_load_adam_firmware(GC_AdamFirmware firmware);
+EXTERN void gui_file_dialog_select_adam_media(GC_AdamMediaSlot slot, bool multiple);
+EXTERN void gui_file_dialog_save_adam_media(GC_AdamMediaSlot slot);
+EXTERN void gui_file_dialog_save_adam_printer(void);
 EXTERN void gui_file_dialog_process_results(void);
 EXTERN bool gui_file_dialog_is_active(void);
 

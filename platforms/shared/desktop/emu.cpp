@@ -19,20 +19,29 @@
 
 #define EMU_IMPORT
 #include "emu.h"
+#include "emu_adam.h"
 
 #include <thread>
 #include <atomic>
 #include <string.h>
+#include <math.h>
+#include <SDL3/SDL.h>
 #include "gearcoleco.h"
+#include "AdamMedia.h"
 #include "F18A.h"
 #include "sound_queue.h"
 #include "config.h"
 #include "rewind.h"
 #include "runahead.h"
+#include "video_recorder.h"
+#include "ogl_renderer.h"
 #include "events.h"
 #include "gui_debug_trace_logger.h"
-#include "no_bios.h"
+#include "gui_notifications.h"
+#include "KeyMap.h"
+#include "KeyMapper.h"
 #include "mcp/mcp_manager.h"
+#include "utils.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #if defined(_WIN32)
@@ -43,11 +52,14 @@
 static GearcolecoCore* gearcoleco;
 static McpManager* mcp_manager;
 static s16* audio_buffer;
-static bool audio_enabled;
 static int emu_debug_halt_step_frames_pending;
 static const int kDebugHaltStepMaxFrames = 4;
 static Uint64 rewind_last_counter = 0;
 static double rewind_pop_accumulator = 0.0;
+static bool video_recording_output = false;
+static std::string key_map_path;
+static SDL_Scancode key_map_built_in_keys[config_adam_key_count];
+static bool key_map_built_in_valid = false;
 
 u16* debug_background_buffer;
 u16* debug_tile_buffer;
@@ -70,6 +82,11 @@ static bool loading_result;
 static char loading_file_path[4096];
 static bool loading_softpatching;
 static Cartridge::ForceConfiguration loading_config;
+static GC_Machine loading_machine;
+static GC_Machine loading_detected_machine;
+static int loading_adam_boot_mode;
+static char loaded_content_path[4096];
+static char loaded_debug_identity[1200];
 
 static void save_ram(void);
 static void load_ram(void);
@@ -87,8 +104,14 @@ static void update_debug_f18a_nametable_buffer(void);
 static void update_debug_f18a_pattern_buffer(void);
 static void update_debug_f18a_sprite_buffers(void);
 static void debug_step_instruction(void);
+static void get_video_recording_size(const GC_RuntimeInfo& runtime, int* width, int* height);
 static void reset_rewind_timing(void);
 static int get_rewind_pop_budget(void);
+static void set_debug_identity(GC_Machine machine, const char* content_name);
+static void update_key_map(void);
+static void update_key_map_built_in(void);
+static std::string get_key_map_path(std::string* title);
+static void save_key_map(void);
 
 bool emu_init(void)
 {
@@ -108,8 +131,9 @@ bool emu_init(void)
     rewind_init();
     runahead_init();
 
-    audio_enabled = true;
     emu_audio_sync = true;
+    emu_audio_rate_control = false;
+    emu_audio_ratio = 1.0f;
     emu_debug_disable_breakpoints = false;
     emu_debug_irq_breakpoints = false;
     emu_debug_command = Debug_Command_None;
@@ -117,10 +141,14 @@ bool emu_init(void)
     emu_debug_pc_changed = false;
     emu_debug_step_frames_pending = 0;
     emu_frame_counter = 0;
-    emu_debug_tile_palette = 0;
+    emu_video_frame_counter = 0;
     emu_debug_tile_color_mode = true;
     emu_debug_f18a_layer = 0;
     emu_debug_f18a_pattern_palette = 0;
+    loaded_content_path[0] = '\0';
+    loaded_debug_identity[0] = '\0';
+
+    emu_adam_init();
 
     for (int i = 0; i < 5; i++)
     {
@@ -143,7 +171,15 @@ void emu_destroy(void)
     }
     loading_state.store(Loading_State_None);
 
+    emu_stop_video_recording();
     save_ram();
+
+    gearcoleco->GetKeyMapper()->Close();
+    save_key_map();
+
+    if (!emu_flush_adam_media())
+        Error("Unable to flush one or more ADAM working copies during shutdown");
+
     SafeDelete(mcp_manager);
     rewind_destroy();
     runahead_destroy();
@@ -159,16 +195,67 @@ void emu_destroy(void)
 
 static void load_media_thread_func(void)
 {
-    loading_result = gearcoleco->LoadROM(loading_file_path, &loading_config, loading_softpatching);
+    EmuDesktopContent content;
+    if (!emu_adam_classify_content(loading_file_path, loading_machine, &content))
+    {
+        loading_result = false;
+        loading_state.store(Loading_State_Finished);
+        return;
+    }
+
+    GC_Machine machine = loading_machine;
+
+    if (machine == GC_MACHINE_AUTO)
+        machine = content.type == EmuDesktopContentCartridge ? GC_MACHINE_COLECOVISION : GC_MACHINE_ADAM;
+
+    loading_detected_machine = machine;
+
+    if (machine == GC_MACHINE_ADAM)
+    {
+        loading_result = emu_adam_load_content(&content, loading_file_path, loading_adam_boot_mode, &loading_config, loading_softpatching);
+
+        if (loading_result)
+        {
+            strncpy_fit(loaded_content_path, loading_file_path, sizeof(loaded_content_path));
+            set_debug_identity(machine, content.entry_name);
+        }
+    }
+    else if (content.type != EmuDesktopContentCartridge)
+    {
+        Error("ADAM media cannot be loaded while ColecoVision is selected");
+        loading_result = false;
+    }
+    else
+    {
+        loading_result = gearcoleco->LoadROMFromBuffer(content.data, (int)content.size, &loading_config, content.source_path, loading_softpatching);
+
+        if (loading_result)
+        {
+            emu_adam_clear_host_media();
+            strncpy_fit(loaded_content_path, loading_file_path, sizeof(loaded_content_path));
+            set_debug_identity(machine, content.entry_name);
+        }
+    }
+
+    emu_adam_destroy_content(&content);
     loading_state.store(Loading_State_Finished);
 }
 
-void emu_load_media_async(const char* file_path, Cartridge::ForceConfiguration config)
+bool emu_load_media_async(const char* file_path, Cartridge::ForceConfiguration config)
 {
     if (loading_state.load() != Loading_State_None)
-        return;
+        return false;
 
-    gui_debug_trace_logger_reset();
+    if (!IsValidPointer(file_path) || (file_path[0] == '\0'))
+        return false;
+
+    if (!emu_flush_adam_media())
+    {
+        Error("Unable to flush dirty ADAM media; current content was kept loaded");
+        return false;
+    }
+
+    gui_debug_trace_logger_reset("media_change");
 
     emu_debug_command = Debug_Command_None;
     reset_buffers();
@@ -179,12 +266,18 @@ void emu_load_media_async(const char* file_path, Cartridge::ForceConfiguration c
     loading_result = false;
     loading_softpatching = config_emulator.softpatching;
     loading_config = config;
+    gearcoleco->SetAdamRegion(config.region);
+    loading_machine = (GC_Machine)config_emulator.machine;
+    loading_detected_machine = GC_MACHINE_AUTO;
+    loading_adam_boot_mode = config_emulator.adam_boot_mode;
+    emu_adam_prepare_load();
     gearcoleco->SetVideoChip((GC_VideoChip)config_video.video_chip);
     loading_state.store(Loading_State_Loading);
     if (loading_thread_active)
         loading_thread.join();
     loading_thread = std::thread(load_media_thread_func);
     loading_thread_active = true;
+    return true;
 }
 
 bool emu_is_media_loading(void)
@@ -192,9 +285,24 @@ bool emu_is_media_loading(void)
     return loading_state.load() == Loading_State_Loading;
 }
 
+bool emu_is_busy(void)
+{
+    return loading_state.load() != Loading_State_None;
+}
+
+GC_Machine emu_get_last_load_machine(void)
+{
+    return loading_detected_machine;
+}
+
+bool emu_get_last_load_result(void)
+{
+    return loading_state.load() == Loading_State_None && loading_result;
+}
+
 static void apply_video_config(void)
 {
-    emu_set_overscan(config_debug.debug ? 0 : config_video.overscan);
+    emu_set_overscan(config_debug.debug ? config_debug.overscan : config_video.overscan);
     emu_video_no_sprite_limit(config_video.sprite_limit);
     if (config_video.palette == 2)
         emu_palette(config_video.color);
@@ -232,20 +340,159 @@ bool emu_finish_media_loading(void)
     return true;
 }
 
-void emu_render_current_frame(void)
+
+bool emu_start_adam(const char* const* media_paths)
 {
-    if (emu_is_empty())
+    if ((loading_state.load() != Loading_State_None) || !emu_flush_adam_media())
+        return false;
+
+    gearcoleco->SetVideoChip((GC_VideoChip)config_video.video_chip);
+    gearcoleco->SetAdamRegion(config_emulator.region == 2 ? Cartridge::CartridgePAL :
+        (config_emulator.region == 1 ? Cartridge::CartridgeNTSC : Cartridge::CartridgeUnknownRegion));
+
+    bool keep_media = gearcoleco->GetMachine() == GC_MACHINE_ADAM && !gearcoleco->IsReady() && !media_paths;
+
+    emu_adam_prepare_load();
+
+    if (!emu_adam_load_firmware())
+        return false;
+
+    if (!keep_media)
+    {
+        if (!emu_adam_prepare_session(media_paths))
+            return false;
+
+        save_ram();
+        gearcoleco->UnloadContent();
+        emu_adam_clear_host_media();
+
+        loaded_content_path[0] = '\0';
+
+        if (media_paths)
+        {
+            for (int i = 0; i < GC_ADAM_MEDIA_SLOT_COUNT; i++)
+            {
+                if (media_paths[i] && media_paths[i][0])
+                {
+                    strncpy_fit(loaded_content_path, media_paths[i], sizeof(loaded_content_path));
+                    break;
+                }
+            }
+        }
+
+        if (!emu_adam_commit_session())
+            return false;
+    }
+
+    reset_buffers();
+
+    if (!gearcoleco->StartAdam(GC_ADAM_BOOT_COMPUTER))
+        return false;
+
+    if (keep_media)
+        load_ram();
+
+    events_sync_input();
+
+    set_debug_identity(GC_MACHINE_ADAM, loaded_content_path[0] ? get_filename(loaded_content_path) : NULL);
+
+    emu_audio_reset();
+    apply_video_config();
+    update_savestates_data();
+    rewind_reset();
+    runahead_reset();
+    return true;
+}
+
+bool emu_power_off_adam(void)
+{
+    if (emu_is_busy() || gearcoleco->GetMachine() != GC_MACHINE_ADAM || !emu_flush_adam_media())
+        return false;
+
+    save_ram();
+    events_release_adam_keys();
+
+    gearcoleco->PowerOffAdam();
+
+    emu_debug_command = Debug_Command_None;
+    emu_debug_halt_step_frames_pending = 0;
+    emu_debug_step_frames_pending = 0;
+
+    reset_buffers();
+    emu_audio_reset();
+    rewind_reset();
+    runahead_reset();
+    update_savestates_data();
+
+    return true;
+}
+
+bool emu_unload_content(void)
+{
+    if ((loading_state.load() != Loading_State_None) || !emu_flush_adam_media())
+        return false;
+
+    save_ram();
+    gearcoleco->UnloadContent();
+    emu_adam_clear_host_media();
+
+    loaded_content_path[0] = '\0';
+    loaded_debug_identity[0] = '\0';
+
+    reset_buffers();
+    rewind_reset();
+    runahead_reset();
+    update_savestates_data();
+
+    return true;
+}
+
+
+GC_Machine emu_get_machine(void)
+{
+    return loading_state.load() == Loading_State_None ? gearcoleco->GetMachine() : GC_MACHINE_AUTO;
+}
+
+const char* emu_get_content_path(void)
+{
+    return loaded_content_path;
+}
+
+const char* emu_get_content_name(void)
+{
+    if (loaded_content_path[0] != '\0')
+        return get_filename(loaded_content_path);
+    return gearcoleco->GetMachine() == GC_MACHINE_ADAM ? "ADAM" : "";
+}
+
+bool emu_get_debug_identity(char* identity, size_t identity_size)
+{
+    if (!IsValidPointer(identity) || (identity_size == 0))
+        return false;
+
+    identity[0] = '\0';
+
+    if ((loading_state.load() != Loading_State_None) || emu_is_empty() || (loaded_debug_identity[0] == '\0'))
+        return false;
+
+    strncpy_fit(identity, loaded_debug_identity, identity_size);
+
+    return true;
+}
+
+static void set_debug_identity(GC_Machine machine, const char* content_name)
+{
+    const char* machine_name = machine == GC_MACHINE_ADAM ? "ADAM" : "ColecoVision";
+
+    if (!IsValidPointer(content_name) || (content_name[0] == '\0'))
+    {
+        strncpy_fit(loaded_debug_identity, machine_name, sizeof(loaded_debug_identity));
         return;
+    }
 
-    GC_RuntimeInfo runtime;
-    gearcoleco->GetRuntimeInfo(runtime);
-    int size = gearcoleco->GetMemory()->IsBiosLoaded() ? runtime.screen_width * runtime.screen_height : GC_RESOLUTION_WIDTH * GC_RESOLUTION_HEIGHT;
-    u16* src_buffer = gearcoleco->GetMemory()->IsBiosLoaded() ? gearcoleco->GetVideo()->GetFrameBuffer() : kNoBiosImage;
-
-    gearcoleco->GetVideo()->Render32bit(src_buffer, emu_frame_buffer, GC_PIXEL_RGBA8888, size, true);
-
-    if (config_debug.debug)
-        update_debug();
+    char name[1024];
+    get_filename_without_extension(content_name, name, sizeof(name));
+    snprintf(loaded_debug_identity, sizeof(loaded_debug_identity), "%s - %s", machine_name, name);
 }
 
 void emu_reset_rewind_timing(void)
@@ -261,7 +508,23 @@ void emu_update(void)
     emu_mcp_pump_commands();
 
     if (emu_is_empty())
+    {
+        gearcoleco->GetKeyMapper()->Close();
+        update_key_map();
         return;
+    }
+
+    update_key_map();
+
+    if (gearcoleco->GetKeyMapper()->IsOpen())
+    {
+        int mapper_samples = 0;
+        gearcoleco->RunToVBlank(emu_frame_buffer, audio_buffer, &mapper_samples);
+        emu_video_recording_frame_pending = false;
+        memset(audio_buffer, 0, GC_AUDIO_QUEUE_SIZE * sizeof(s16));
+        sound_queue_write(audio_buffer, GC_AUDIO_QUEUE_SIZE, false);
+        return;
+    }
 
     int sampleCount = 0;
     bool frame_executed = false;
@@ -275,6 +538,7 @@ void emu_update(void)
         {
             if (!rewind_pop())
                 break;
+            emu_video_frame_counter++;
         }
 
         int silence_count = GC_AUDIO_QUEUE_SIZE;
@@ -368,13 +632,32 @@ void emu_update(void)
     if (frame_executed)
     {
         if (frame_completed)
+        {
             emu_frame_counter++;
+            emu_video_frame_counter++;
+            emu_adam_update();
+        }
         rewind_push();
+        if (video_recorder_is_recording())
+        {
+            video_recorder_add_audio(audio_buffer, sampleCount);
+            if (frame_completed)
+            {
+                if (video_recording_output)
+                    emu_video_recording_frame_pending = true;
+                else
+                {
+                    GC_RuntimeInfo runtime;
+                    emu_get_runtime(runtime);
+                    video_recorder_add_video(emu_frame_buffer, runtime.screen_width, runtime.screen_height, 4);
+                }
+            }
+        }
     }
 
     if ((sampleCount > 0) && !gearcoleco->IsPaused())
     {
-        sound_queue_write(audio_buffer, sampleCount, emu_audio_sync);
+        sound_queue_write(audio_buffer, sampleCount, emu_audio_sync, emu_audio_rate_control, emu_audio_ratio, !emu_audio_sync);
     }
     else if (gearcoleco->IsPaused())
     {
@@ -432,6 +715,85 @@ void emu_key_released(GC_Controllers controller, GC_Keys key)
     gearcoleco->KeyReleased(controller, key);
 }
 
+void emu_host_hotkey_used(void)
+{
+    if (IsValidPointer(gearcoleco))
+        gearcoleco->DiscardDeferredHostKeys();
+}
+
+bool emu_has_pointer(void)
+{
+    return !emu_is_empty() && (config_emulator.spinner > 0);
+}
+
+bool emu_key_mapper_is_open(void)
+{
+    return IsValidPointer(gearcoleco) && gearcoleco->GetKeyMapper()->IsOpen();
+}
+
+void emu_key_mapper_toggle(void)
+{
+    if (emu_is_busy())
+        return;
+
+    KeyMapper* mapper = gearcoleco->GetKeyMapper();
+
+    if (mapper->IsOpen())
+    {
+        mapper->Close();
+        save_key_map();
+        return;
+    }
+
+    if (emu_is_empty() || (gearcoleco->GetMachine() != GC_MACHINE_ADAM))
+        return;
+
+    update_key_map();
+    mapper->SetHotkeyNames(config_hotkeys[config_HotkeyIndex_KeyboardMapper].str,
+        config_hotkeys[config_HotkeyIndex_KeyMapping].str);
+    mapper->Open();
+}
+
+void emu_key_mapper_set_pointer(int x, int y)
+{
+    if (!emu_is_busy())
+        gearcoleco->GetKeyMapper()->SetPointer(x, y);
+}
+
+void emu_key_mapper_set_buttons(u8 buttons)
+{
+    if (emu_is_busy())
+        return;
+
+    KeyMapper* mapper = gearcoleco->GetKeyMapper();
+    mapper->SetPointerButtons(buttons);
+
+    if (!mapper->IsOpen())
+        save_key_map();
+}
+
+bool emu_key_mapping_is_enabled(void)
+{
+    return !IsValidPointer(gearcoleco) || gearcoleco->GetKeyMap()->IsEnabled();
+}
+
+void emu_key_mapping_toggle(void)
+{
+    if (!emu_is_busy())
+        gearcoleco->GetKeyMap()->SetEnabled(!gearcoleco->GetKeyMap()->IsEnabled());
+}
+
+const char* emu_key_map_get_path(void)
+{
+    return key_map_path.c_str();
+}
+
+void emu_key_map_save(void)
+{
+    if (!emu_is_busy())
+        save_key_map();
+}
+
 void emu_spinner1(int movement)
 {
     gearcoleco->Spinner1(movement);
@@ -466,7 +828,7 @@ bool emu_is_empty(void)
 {
     if (loading_state.load() != Loading_State_None)
         return true;
-    return !gearcoleco->GetCartridge()->IsReady();
+    return !gearcoleco->IsReady();
 }
 
 bool emu_is_bios_loaded(void)
@@ -474,9 +836,14 @@ bool emu_is_bios_loaded(void)
     return gearcoleco->GetMemory()->IsBiosLoaded();
 }
 
-void emu_reset(Cartridge::ForceConfiguration config)
+void emu_save_persistent_data(void)
 {
-    gui_debug_trace_logger_reset();
+    save_ram();
+}
+
+void emu_reset(Cartridge::ForceConfiguration config, bool adam_computer, bool save_persistent_data)
+{
+    gui_debug_trace_logger_reset("reset");
     emu_debug_command = Debug_Command_None;
     emu_debug_halt_step_frames_pending = 0;
     emu_debug_step_frames_pending = 0;
@@ -485,23 +852,22 @@ void emu_reset(Cartridge::ForceConfiguration config)
     reset_buffers();
     reset_rewind_timing();
     emu_audio_reset();
-    save_ram();
+    if (save_persistent_data)
+        emu_save_persistent_data();
     gearcoleco->SetVideoChip((GC_VideoChip)config_video.video_chip);
-    gearcoleco->ResetROM(&config);
+    gearcoleco->SetAdamRegion(config.region);
+    if (adam_computer && gearcoleco->GetMachine() == GC_MACHINE_ADAM)
+        gearcoleco->ResetAdamComputer();
+    else
+        gearcoleco->ResetROM(&config);
     apply_video_config();
     load_ram();
     rewind_reset();
     runahead_reset();
 }
 
-void emu_dissasemble_rom(void)
-{
-    gearcoleco->SaveDisassembledROM();
-}
-
 void emu_audio_mute(bool mute)
 {
-    audio_enabled = !mute;
     gearcoleco->GetAudio()->Mute(mute);
 }
 
@@ -512,13 +878,16 @@ void emu_audio_set_master_volume(float volume)
 
 void emu_audio_reset(void)
 {
-    sound_queue_stop();
-    sound_queue_start(GC_AUDIO_SAMPLE_RATE, 2, GC_AUDIO_QUEUE_SIZE, config_audio.buffer_count);
+    if (sound_queue_is_open())
+        sound_queue_flush();
+    else
+        emu_audio_restart();
 }
 
-bool emu_is_audio_enabled(void)
+void emu_audio_restart(void)
 {
-    return audio_enabled;
+    sound_queue_stop();
+    sound_queue_start(GC_AUDIO_SAMPLE_RATE, 2, GC_AUDIO_QUEUE_SIZE, config_audio.buffer_count);
 }
 
 bool emu_is_audio_open(void)
@@ -546,7 +915,7 @@ void emu_load_ram(const char* file_path, Cartridge::ForceConfiguration config)
 {
     if (!emu_is_empty())
     {
-        gui_debug_trace_logger_reset();
+        gui_debug_trace_logger_reset("media_change");
         save_ram();
         gearcoleco->ResetROM(&config);
         gearcoleco->LoadRam(file_path, true);
@@ -555,47 +924,92 @@ void emu_load_ram(const char* file_path, Cartridge::ForceConfiguration config)
     }
 }
 
-void emu_save_state_slot(int index)
+bool emu_save_state_slot(int index)
 {
     if (!emu_is_empty())
     {
+        if (gearcoleco->GetMachine() == GC_MACHINE_ADAM)
+        {
+            char state_path[4096];
+            bool saved = emu_adam_get_state_path(index, state_path, sizeof(state_path)) &&
+                gearcoleco->SaveState(state_path, -1, true);
+            update_savestates_data();
+            return saved;
+        }
+
         const char* dir = get_configurated_dir(config_emulator.savestates_dir_option, config_emulator.savestates_path.c_str());
-        gearcoleco->SaveState(dir, index, true);
+        bool saved = gearcoleco->SaveState(dir, index, true);
         update_savestates_data();
+        return saved;
     }
+    return false;
 }
 
-void emu_load_state_slot(int index)
+bool emu_load_state_slot(int index)
 {
     if (!emu_is_empty())
     {
+        if (gearcoleco->GetMachine() == GC_MACHINE_ADAM)
+        {
+            char state_path[4096];
+            if (emu_adam_get_state_path(index, state_path, sizeof(state_path)) && gearcoleco->LoadState(state_path, -1))
+            {
+                emu_debug_state_restored();
+                emu_reconcile_adam_media_after_state_load();
+                emu_restore_adam_state_screenshot(state_path);
+                events_sync_input();
+                rewind_reset();
+                runahead_reset();
+                return true;
+            }
+            return false;
+        }
+
         const char* dir = get_configurated_dir(config_emulator.savestates_dir_option, config_emulator.savestates_path.c_str());
         if (gearcoleco->LoadState(dir, index))
         {
+            emu_debug_state_restored();
             events_sync_input();
             rewind_reset();
             runahead_reset();
+            return true;
         }
     }
+    return false;
 }
 
-void emu_save_state_file(const char* file_path)
+bool emu_save_state_file(const char* file_path)
 {
-    if (!emu_is_empty())
-        gearcoleco->SaveState(file_path, -1);
+    if (emu_is_empty())
+        return false;
+
+    return gearcoleco->SaveState(file_path, -1, gearcoleco->GetMachine() == GC_MACHINE_ADAM);
 }
 
-void emu_load_state_file(const char* file_path)
+bool emu_load_state_file(const char* file_path)
 {
-    if (!emu_is_empty())
-    {
-        if (gearcoleco->LoadState(file_path, -1))
-        {
-            events_sync_input();
-            rewind_reset();
-            runahead_reset();
-        }
-    }
+    if (emu_is_empty())
+        return false;
+
+    if (!gearcoleco->LoadState(file_path, -1))
+        return false;
+
+    emu_debug_state_restored();
+    emu_reconcile_adam_media_after_state_load();
+    emu_restore_adam_state_screenshot(file_path);
+    events_sync_input();
+    rewind_reset();
+    runahead_reset();
+    return true;
+}
+
+void emu_debug_state_restored(void)
+{
+    gearcoleco->GetProcessor()->ResetDebuggerExecutionState();
+    emu_debug_command = Debug_Command_None;
+    emu_debug_step_frames_pending = 0;
+    emu_debug_halt_step_frames_pending = 0;
+    emu_debug_pc_changed = true;
 }
 
 void emu_get_runtime(GC_RuntimeInfo& runtime)
@@ -618,6 +1032,30 @@ void emu_get_info(char* info, int buffer_size)
 {
     if (!emu_is_empty())
     {
+        if (gearcoleco->GetMachine() == GC_MACHINE_ADAM)
+        {
+            int inserted = 0;
+            int dirty = 0;
+            for (int i = 0; i < GC_ADAM_MEDIA_SLOT_COUNT; i++)
+            {
+                AdamMedia* media = gearcoleco->GetAdamMedia((GC_AdamMediaSlot)i);
+                if (IsValidPointer(media) && media->IsInserted())
+                {
+                    inserted++;
+                    if (media->IsDirty())
+                        dirty++;
+                }
+            }
+
+            GC_RuntimeInfo runtime;
+            gearcoleco->GetRuntimeInfo(runtime);
+            snprintf(info, buffer_size,
+                "Machine: ADAM\nBoot Mode: %s\nContent: %s\nMounted Media: %d\nDirty Media: %d\nScreen Resolution: %dx%d",
+                gearcoleco->GetAdamBootMode() == GC_ADAM_BOOT_CARTRIDGE ? "Cartridge" : "Computer",
+                emu_get_content_name(), inserted, dirty, runtime.screen_width, runtime.screen_height);
+            return;
+        }
+
         Cartridge* cart = gearcoleco->GetCartridge();
         GC_RuntimeInfo runtime;
         gearcoleco->GetRuntimeInfo(runtime);
@@ -633,7 +1071,7 @@ void emu_get_info(char* info, int buffer_size)
     }
     else
     {
-        snprintf(info, buffer_size, "There is no ROM loaded!");
+        snprintf(info, buffer_size, "There is no content loaded!");
     }
 }
 
@@ -723,11 +1161,6 @@ void emu_debug_continue(void)
     emu_debug_command = Debug_Command_Continue;
 }
 
-bool emu_debug_halt_step_active(void)
-{
-    return emu_debug_halt_step_frames_pending > 0;
-}
-
 void emu_set_disassembler_syntax(int syntax)
 {
 #if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
@@ -778,9 +1211,9 @@ void emu_mcp_pump_commands(void)
     mcp_manager->PumpCommands(gearcoleco);
 }
 
-void emu_load_bios(const char* file_path)
+bool emu_load_bios(const char* file_path)
 {
-    gearcoleco->GetMemory()->LoadBios(file_path);
+    return emu_load_adam_firmware(GC_ADAM_FIRMWARE_OS7, file_path);
 }
 
 void emu_video_no_sprite_limit(bool enabled)
@@ -814,23 +1247,26 @@ void emu_set_overscan(int overscan)
     }
 }
 
-void emu_save_screenshot(const char* file_path)
+bool emu_save_screenshot(const char* file_path)
 {
-    if (!gearcoleco->GetCartridge()->IsReady())
-        return;
+    if (!gearcoleco->IsReady())
+        return false;
 
     GC_RuntimeInfo runtime;
     emu_get_runtime(runtime);
 
-    stbi_write_png(file_path, runtime.screen_width, runtime.screen_height, 4, emu_frame_buffer, runtime.screen_width * 4);
+    if (!stbi_write_png(file_path, runtime.screen_width, runtime.screen_height, 4, emu_frame_buffer,
+        runtime.screen_width * 4))
+        return false;
 
     Log("Screenshot saved to %s", file_path);
+    return true;
 }
 
-void emu_save_sprite(const char* file_path, int index)
+bool emu_save_sprite(const char* file_path, int index)
 {
-    if (!gearcoleco->GetCartridge()->IsReady())
-        return;
+    if (!gearcoleco->IsReady())
+        return false;
 
     Video* video = gearcoleco->GetVideo();
     int sprite_size;
@@ -850,41 +1286,49 @@ void emu_save_sprite(const char* file_path, int index)
         buffer = emu_debug_sprite_buffers[index];
     }
 
-    stbi_write_png(file_path, sprite_size, sprite_size, 4, buffer, 16 * 4);
+    if (!stbi_write_png(file_path, sprite_size, sprite_size, 4, buffer, 16 * 4))
+        return false;
 
     Log("Sprite saved to %s", file_path);
+    return true;
 }
 
-void emu_save_background(const char* file_path)
+bool emu_save_background(const char* file_path)
 {
-    if (!gearcoleco->GetCartridge()->IsReady())
-        return;
+    if (!gearcoleco->IsReady())
+        return false;
 
     Video* video = gearcoleco->GetVideo();
+    bool saved = false;
     if (video->IsF18AHardware())
     {
         update_debug_f18a_nametable_buffer();
         video->Render32bit(debug_f18a_nametable_buffer, emu_debug_f18a_nametable_buffer,
             GC_PIXEL_RGBA8888, GC_VIDEO_MAX_WIDTH * GC_VIDEO_MAX_HEIGHT);
-        stbi_write_png(file_path, video->GetScreenWidth(), video->GetScreenHeight(), 4,
-            emu_debug_f18a_nametable_buffer, GC_VIDEO_MAX_WIDTH * 4);
+        saved = stbi_write_png(file_path, video->GetScreenWidth(), video->GetScreenHeight(), 4,
+            emu_debug_f18a_nametable_buffer, GC_VIDEO_MAX_WIDTH * 4) != 0;
     }
     else
     {
         update_debug_background_buffer();
         video->Render32bit(debug_background_buffer, emu_debug_background_buffer, GC_PIXEL_RGBA8888, 256 * 256);
-        stbi_write_png(file_path, 256, 192, 4, emu_debug_background_buffer, 256 * 4);
+        saved = stbi_write_png(file_path, 256, 192, 4, emu_debug_background_buffer, 256 * 4) != 0;
     }
 
+    if (!saved)
+        return false;
+
     Log("Background saved to %s", file_path);
+    return true;
 }
 
-void emu_save_tiles(const char* file_path)
+bool emu_save_tiles(const char* file_path)
 {
-    if (!gearcoleco->GetCartridge()->IsReady())
-        return;
+    if (!gearcoleco->IsReady())
+        return false;
 
     Video* video = gearcoleco->GetVideo();
+    bool saved = false;
     if (video->IsF18AHardware())
     {
         update_debug_f18a_pattern_buffer();
@@ -892,21 +1336,25 @@ void emu_save_tiles(const char* file_path)
         u8* regs = video->GetRegisters();
         int mode = ((regs[0] & 0x04) << 1) | ((regs[0] & 0x02) << 1) | ((regs[1] & 0x08) >> 2) | ((regs[1] & 0x10) >> 4);
         int height = mode == 4 ? 192 : 64;
-        stbi_write_png(file_path, 256, height, 4, emu_debug_f18a_pattern_buffer, 256 * 4);
+        saved = stbi_write_png(file_path, 256, height, 4, emu_debug_f18a_pattern_buffer, 256 * 4) != 0;
     }
     else
     {
         update_debug_tile_buffer();
         video->Render32bit(debug_tile_buffer, emu_debug_tile_buffer, GC_PIXEL_RGBA8888, 256 * 256);
-        stbi_write_png(file_path, 256, 256, 4, emu_debug_tile_buffer, 256 * 4);
+        saved = stbi_write_png(file_path, 256, 256, 4, emu_debug_tile_buffer, 256 * 4) != 0;
     }
 
+    if (!saved)
+        return false;
+
     Log("Pattern table saved to %s", file_path);
+    return true;
 }
 
 int emu_get_screenshot_png(unsigned char** out_buffer)
 {
-    if (!gearcoleco->GetCartridge()->IsReady())
+    if (!gearcoleco->IsReady())
         return 0;
 
     GC_RuntimeInfo runtime;
@@ -916,15 +1364,14 @@ int emu_get_screenshot_png(unsigned char** out_buffer)
     int len = 0;
 
     *out_buffer = stbi_write_png_to_mem(emu_frame_buffer, stride,
-                                         runtime.screen_width, runtime.screen_height,
-                                         4, &len);
+                        runtime.screen_width, runtime.screen_height, 4, &len);
 
     return len;
 }
 
 int emu_get_sprite_png(int sprite_index, unsigned char** out_buffer)
 {
-    if (!gearcoleco->GetCartridge()->IsReady())
+    if (!gearcoleco->IsReady())
         return 0;
 
     if (sprite_index < 0 || sprite_index >= GC_MAX_SPRITES)
@@ -959,10 +1406,10 @@ int emu_get_sprite_png(int sprite_index, unsigned char** out_buffer)
     return len;
 }
 
-void emu_start_vgm_recording(const char* file_path)
+bool emu_start_vgm_recording(const char* file_path)
 {
-    if (!gearcoleco->GetCartridge()->IsReady())
-        return;
+    if (!gearcoleco->IsReady())
+        return false;
 
     if (gearcoleco->GetAudio()->IsVgmRecording())
         emu_stop_vgm_recording();
@@ -972,14 +1419,18 @@ void emu_start_vgm_recording(const char* file_path)
 
     bool is_pal = (runtime.region == Region_PAL);
     int clock_rate = is_pal ? GC_MASTER_CLOCK_PAL : GC_MASTER_CLOCK_NTSC;
-    Cartridge* cartridge = gearcoleco->GetCartridge();
     VgmMetadata metadata;
-    metadata.game_name = cartridge->IsInGameDatabase() ? cartridge->GetGameDatabaseName() : cartridge->GetFileName();
-    metadata.system_name = "ColecoVision";
+    Cartridge* cartridge = gearcoleco->GetCartridge();
+    metadata.game_name = gearcoleco->GetMachine() == GC_MACHINE_ADAM ? emu_get_content_name() :
+        (cartridge->IsInGameDatabase() ? cartridge->GetGameDatabaseName() : cartridge->GetFileName());
+    metadata.system_name = gearcoleco->GetMachine() == GC_MACHINE_ADAM ? "Coleco ADAM" : "ColecoVision";
     metadata.comment = "Created with " GEARCOLECO_TITLE " " GEARCOLECO_VERSION;
 
-    if (gearcoleco->GetAudio()->StartVgmRecording(file_path, clock_rate, is_pal, metadata))
-        Log("VGM recording started: %s", file_path);
+    if (!gearcoleco->GetAudio()->StartVgmRecording(file_path, clock_rate, is_pal, metadata))
+        return false;
+
+    Log("VGM recording started: %s", file_path);
+    return true;
 }
 
 void emu_stop_vgm_recording(void)
@@ -996,11 +1447,82 @@ bool emu_is_vgm_recording(void)
     return gearcoleco->GetAudio()->IsVgmRecording();
 }
 
+bool emu_start_video_recording(const char* file_path)
+{
+    if (!gearcoleco->IsReady())
+        return false;
+
+    if (video_recorder_is_recording())
+        emu_stop_video_recording();
+
+    GC_RuntimeInfo runtime;
+    emu_get_runtime(runtime);
+
+    int width = 0;
+    int height = 0;
+    video_recording_output = ogl_renderer_get_output_size(&width, &height) && (width > 1) && (height > 1);
+    emu_video_recording_frame_pending = false;
+
+    if (video_recording_output)
+    {
+        width &= ~1;
+        height &= ~1;
+    }
+    else
+        get_video_recording_size(runtime, &width, &height);
+
+    if (!video_recorder_start(file_path, width, height, emu_get_frame_rate(), GC_AUDIO_SAMPLE_RATE, (Video_Recorder_Quality)config_video.recording_quality))
+        return false;
+
+    Log("Video recording started: %s (%dx%d%s)", file_path, width, height, video_recording_output ? ", shader output" : "");
+    return true;
+}
+
+void emu_stop_video_recording(void)
+{
+    if (video_recorder_is_recording())
+    {
+        video_recorder_stop();
+        Log("Video recording stopped");
+    }
+}
+
+bool emu_is_video_recording(void)
+{
+    return video_recorder_is_recording();
+}
+
+static void get_video_recording_size(const GC_RuntimeInfo& runtime, int* width, int* height)
+{
+    int selected_ratio = config_debug.debug ? 0 : config_video.ratio;
+    float ratio = 0.0f;
+
+    if (config_video.recording_ratio > 0)
+        selected_ratio = config_video.recording_ratio - 1;
+
+    switch (selected_ratio)
+    {
+        case 1:
+            ratio = 4.0f / 3.0f;
+            break;
+        case 2:
+            ratio = 16.0f / 9.0f;
+            break;
+        case 3:
+            ratio = 16.0f / 10.0f;
+            break;
+        default:
+            ratio = (float)runtime.screen_width / (float)runtime.screen_height;
+    }
+
+    *height = runtime.screen_height * config_video.recording_scale;
+    *width = (int)roundf((float)*height * ratio);
+    *width += *width & 1;
+    *height += *height & 1;
+}
+
 static void save_ram(void)
 {
-#ifdef DEBUG_GEARCOLECO
-    emu_dissasemble_rom();
-#endif
     const char* dir = get_configurated_dir(config_emulator.savefiles_dir_option, config_emulator.savefiles_path.c_str());
     gearcoleco->SaveRam(dir);
 }
@@ -1009,6 +1531,140 @@ static void load_ram(void)
 {
     const char* dir = get_configurated_dir(config_emulator.savefiles_dir_option, config_emulator.savefiles_path.c_str());
     gearcoleco->LoadRam(dir);
+}
+
+static void update_key_map(void)
+{
+    update_key_map_built_in();
+
+    std::string title;
+    std::string path = get_key_map_path(&title);
+    KeyMap* key_map = gearcoleco->GetKeyMap();
+
+    gearcoleco->GetKeyMapper()->SetTitle(title.c_str());
+
+    if (path == key_map_path)
+        return;
+
+    save_key_map();
+    key_map_path = path;
+    key_map->SetEnabled(true);
+    key_map->ClearLayer(GC_KEY_MAP_USER);
+    key_map->SetChanged(false);
+
+    if (path.empty())
+        return;
+
+    std::ifstream file;
+    open_ifstream_utf8(file, path.c_str(), std::ios::in | std::ios::binary);
+
+    if (!file.is_open())
+        return;
+
+    std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    std::string error;
+
+    if (!key_map->SetLayer(GC_KEY_MAP_USER, text.c_str(), &error))
+    {
+        key_map->ClearLayer(GC_KEY_MAP_USER);
+        Log("Ignoring the key map %s: %s", path.c_str(), error.c_str());
+        gui_notify(gui_NotificationError, ICON_MD_KEYBOARD, "Key map ignored", error.c_str(), "key_map");
+    }
+}
+
+static void update_key_map_built_in(void)
+{
+    SDL_Scancode keys[config_adam_key_count];
+
+    for (int i = 0; i < config_adam_key_count; i++)
+    {
+        SDL_Scancode key = config_emulator.adam_keys[i];
+        keys[i] = ((key != SDL_SCANCODE_UNKNOWN) && !events_adam_reserved_key(key)) ? key : SDL_SCANCODE_UNKNOWN;
+    }
+
+    if (key_map_built_in_valid && (memcmp(keys, key_map_built_in_keys, sizeof(keys)) == 0))
+        return;
+
+    memcpy(key_map_built_in_keys, keys, sizeof(keys));
+    key_map_built_in_valid = true;
+
+    KeyMap* key_map = gearcoleco->GetKeyMap();
+    key_map->ResetBuiltIn(false);
+
+    for (int i = config_adam_key_count - 1; i >= 0; i--)
+    {
+        if ((keys[i] == SDL_SCANCODE_UNKNOWN) || (keys[i] >= GC_HOST_KEY_COUNT))
+            continue;
+
+        GC_KeyMapEntry entry;
+        memset(&entry, 0, sizeof(entry));
+        entry.set = true;
+        entry.count = 1;
+        entry.keys[0] = (u8)config_adam_keys[i].key;
+        key_map->SetEntry(GC_KEY_MAP_BUILT_IN, (u16)keys[i], entry);
+    }
+}
+
+static std::string get_key_map_path(std::string* title)
+{
+    *title = "";
+
+    if (gearcoleco->GetMachine() != GC_MACHINE_ADAM)
+        return "";
+
+    const char* content = emu_get_content_path();
+    const char* directory = get_configurated_dir(config_emulator.savefiles_dir_option, config_emulator.savefiles_path.c_str());
+    char folder[4096];
+    char name[1024];
+    char path[4096];
+
+    if (!IsValidPointer(directory))
+    {
+        if (content[0] != '\0')
+            get_directory(content, folder, sizeof(folder));
+        else
+            strncpy_fit(folder, config_root_path, sizeof(folder));
+
+        directory = folder;
+    }
+
+    if (content[0] != '\0')
+        get_filename_without_extension(content, name, sizeof(name));
+    else
+        strncpy_fit(name, "ADAM", sizeof(name));
+
+    *title = content[0] != '\0' ? get_filename(content) : "ADAM";
+    join_path(directory, (std::string(name) + ".keys").c_str(), path, sizeof(path));
+    return path;
+}
+
+static void save_key_map(void)
+{
+    KeyMap* key_map = gearcoleco->GetKeyMap();
+
+    if (!key_map->IsChanged() || key_map_path.empty())
+        return;
+
+    key_map->SetChanged(false);
+
+    if (key_map->IsLayerEmpty(GC_KEY_MAP_USER))
+    {
+        remove_file_utf8(key_map_path.c_str());
+        return;
+    }
+
+    std::string text = "[keys]\n" + key_map->GetLayer(GC_KEY_MAP_USER);
+    std::ofstream file;
+    open_ofstream_utf8(file, key_map_path.c_str(), std::ios::out | std::ios::binary | std::ios::trunc);
+
+    if (file.is_open())
+        file.write(text.c_str(), (std::streamsize)text.size());
+
+    if (!file.is_open() || file.fail())
+    {
+        Log("Unable to save the key map %s", key_map_path.c_str());
+        gui_notify(gui_NotificationError, ICON_MD_KEYBOARD, "Unable to save the key map", key_map_path.c_str(), "key_map");
+    }
 }
 
 static void reset_buffers(void)
@@ -1052,6 +1708,7 @@ static const char* get_configurated_dir(int location, const char* path)
             return path;
     }
 }
+
 
 static void init_debug(void)
 {
@@ -1200,7 +1857,11 @@ static void update_debug_background_buffer(void)
     switch (mode)
     {
         case 1:
+        case 3:
         {
+            if (mode == 3)
+                pattern_table_addr &= 0x2000;
+
             int fg_color = (regs[7] >> 4) & 0x0F;
             int bg_color = backdrop_color;
             fg_color = (fg_color > 0) ? fg_color : backdrop_color;
@@ -1210,12 +1871,17 @@ static void update_debug_background_buffer(void)
                 int line_offset = line * GC_RESOLUTION_WIDTH;
                 int tile_y = line >> 3;
                 int tile_y_offset = line & 7;
+                int line_region = (tile_y & 0x18) << 5;
 
                 for (int tile_x = 0; tile_x < 40; tile_x++)
                 {
                     int tile_number = (tile_y * 40) + tile_x;
                     int name_tile_addr = name_table_addr + tile_number;
                     int name_tile = vram[name_tile_addr & 0x3FFF];
+
+                    if (mode == 3)
+                        name_tile = (name_tile + line_region) & region_mask;
+
                     u8 pattern_line = vram[(pattern_table_addr + (name_tile << 3) + tile_y_offset) & 0x3FFF];
 
                     int screen_offset = line_offset + (tile_x * 6);
@@ -1238,6 +1904,34 @@ static void update_debug_background_buffer(void)
         }
         case 4:
         {
+            break;
+        }
+        case 5:
+        case 7:
+        {
+            int fg_color = (regs[7] >> 4) & 0x0F;
+            int bg_color = backdrop_color;
+            fg_color = (fg_color > 0) ? fg_color : backdrop_color;
+
+            for (int line = 0; line < 192; line++)
+            {
+                int line_offset = line * GC_RESOLUTION_WIDTH;
+
+                for (int x = 0; x < GC_RESOLUTION_WIDTH; x++)
+                    debug_background_buffer[line_offset + x] = bg_color;
+
+                for (int tile_x = 0; tile_x < 40; tile_x++)
+                {
+                    int screen_offset = line_offset + (tile_x * 6);
+
+                    for (int tile_pixel = 0; tile_pixel < 4; tile_pixel++)
+                        debug_background_buffer[screen_offset + tile_pixel] = fg_color;
+                }
+            }
+            return;
+        }
+        case 6:
+        {
             pattern_table_addr &= 0x2000;
             break;
         }
@@ -1258,9 +1952,12 @@ static void update_debug_background_buffer(void)
             u8 pattern_line = 0;
             u8 color_line = 0;
 
-            if (mode == 4)
+            if ((mode == 4) || (mode == 6))
             {
-                int offset_color = pattern_table_addr + (name_tile << 3) + ((tile_y & 0x03) << 1) + (line & 0x04 ? 1 : 0);
+                if (mode == 6)
+                    name_tile = (name_tile + region) & region_mask;
+
+                int offset_color = pattern_table_addr + (name_tile << 3) + ((line >> 2) & 0x07);
                 color_line = vram[offset_color & 0x3FFF];
 
                 int left_color = color_line >> 4;
@@ -1322,7 +2019,8 @@ static void update_debug_tile_buffer(void)
     u8* regs = video->GetRegisters();
     int mode = video->GetMode();
 
-    int pattern_table_addr = (regs[4] & ((mode == 2) ? 0x04 : 0x07)) << 11;
+    bool split_pattern_table = (mode == 2) || (mode == 3) || (mode == 6);
+    int pattern_table_addr = (regs[4] & (split_pattern_table ? 0x04 : 0x07)) << 11;
 
     if (emu_debug_tile_color_mode)
     {
@@ -1335,11 +2033,6 @@ static void update_debug_tile_buffer(void)
             pattern_table_addr &= 0x2000;
             color_table_addr &= 0x2000;
         }
-        else if (mode == 4)
-        {
-            pattern_table_addr &= 0x2000;
-        }
-
         for (int y = 0; y < 256; y++)
         {
             int width_y = (y * 256);
@@ -1358,7 +2051,7 @@ static void update_debug_tile_buffer(void)
                 int fg_color = 15;
                 int bg_color = 0;
 
-                if (mode == 1)
+                if ((mode == 1) || (mode == 3))
                 {
                     fg_color = (regs[7] >> 4) & 0x0F;
                     bg_color = backdrop_color;
@@ -1367,7 +2060,7 @@ static void update_debug_tile_buffer(void)
                     int tile_data_addr = (pattern_table_addr + (tile_number * 8) + offset_y) & 0x3FFF;
                     pattern_line = vram[tile_data_addr];
                 }
-                else if (mode == 4)
+                else if ((mode == 4) || (mode == 6))
                 {
                     int offset_color = pattern_table_addr + (tile_number << 3) + ((tile_y & 0x03) << 1) + (offset_y & 0x04 ? 1 : 0);
                     color_line = vram[offset_color & 0x3FFF];
@@ -1509,24 +2202,48 @@ void update_savestates_data(void)
 {
     emu_savestates_generation++;
 
+    for (int i = 0; i < 5; i++)
+    {
+        emu_savestates[i].rom_name[0] = 0;
+        SafeDeleteArray(emu_savestates_screenshots[i].data);
+        emu_savestates_screenshots[i].width = 0;
+        emu_savestates_screenshots[i].height = 0;
+        emu_savestates_screenshots[i].size = 0;
+    }
+
     if (emu_is_empty())
         return;
 
     for (int i = 0; i < 5; i++)
     {
-        emu_savestates[i].rom_name[0] = 0;
-        SafeDeleteArray(emu_savestates_screenshots[i].data);
-
         const char* dir = get_configurated_dir(config_emulator.savestates_dir_option, config_emulator.savestates_path.c_str());
+        char adam_state_path[4096];
+        bool adam = gearcoleco->GetMachine() == GC_MACHINE_ADAM;
 
-        if (!gearcoleco->GetSaveStateHeader(i + 1, dir, &emu_savestates[i]))
+        if (adam && !emu_adam_get_state_path(i + 1, adam_state_path,
+            sizeof(adam_state_path)))
             continue;
 
-        if (emu_savestates[i].screenshot_size > 0)
+        if (!(adam ? gearcoleco->GetSaveStateHeader(-1, adam_state_path, &emu_savestates[i]) :
+            gearcoleco->GetSaveStateHeader(i + 1, dir, &emu_savestates[i])))
+            continue;
+
+        if ((emu_savestates[i].screenshot_size > 0) &&
+            (emu_savestates[i].screenshot_size == (size_t)emu_savestates[i].screenshot_width *
+            emu_savestates[i].screenshot_height * 4))
         {
             emu_savestates_screenshots[i].data = new u8[emu_savestates[i].screenshot_size];
             emu_savestates_screenshots[i].size = emu_savestates[i].screenshot_size;
-            gearcoleco->GetSaveStateScreenshot(i + 1, dir, &emu_savestates_screenshots[i]);
+    
+            bool loaded;
+
+            if (adam)
+                loaded = gearcoleco->GetSaveStateScreenshot(-1, adam_state_path, &emu_savestates_screenshots[i]);
+            else
+                loaded = gearcoleco->GetSaveStateScreenshot(i + 1, dir, &emu_savestates_screenshots[i]);
+
+            if (!loaded || (emu_savestates_screenshots[i].size != (size_t)emu_savestates_screenshots[i].width * emu_savestates_screenshots[i].height * 4))
+                SafeDeleteArray(emu_savestates_screenshots[i].data);
         }
     }
 }

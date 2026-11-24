@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "trace_logger_formatter.h"
+#include "AdamNet.h"
 
 static void strip_tags(const char* source, char* destination, size_t size)
 {
@@ -165,6 +166,46 @@ static const char* mapper_name(u8 mapper)
     return mapper < sizeof(names) / sizeof(names[0]) ? names[mapper] : "UNKNOWN";
 }
 
+static const char* adam_command_name(u8 command)
+{
+    static const char* names[] = {"IDLE", "STATUS", "SOFT_RESET", "WRITE", "READ"};
+    return command < sizeof(names) / sizeof(names[0]) ? names[command] : "PCB";
+}
+
+static const char* adam_device_name(u8 device)
+{
+    const AdamNet::DeviceMetadata* metadata = AdamNet::GetDeviceMetadata(device);
+    return metadata ? metadata->name : "Unknown";
+}
+
+static const char* adam_error_name(u8 error)
+{
+    switch (error)
+    {
+        case GC_ADAM_MEDIA_ERROR_NONE: return "none";
+        case GC_ADAM_MEDIA_ERROR_INVALID_ARGUMENT: return "invalid request";
+        case GC_ADAM_MEDIA_ERROR_INVALID_SIZE: return "invalid size";
+        case GC_ADAM_MEDIA_ERROR_NO_MEDIA: return "no media";
+        case GC_ADAM_MEDIA_ERROR_WRITE_PROTECTED: return "write protected";
+        case GC_ADAM_MEDIA_ERROR_OUT_OF_RANGE: return "block out of range";
+        case GC_ADAM_MEDIA_ERROR_CHANGED: return "media changed";
+        default: return "unknown";
+    }
+}
+
+static const char* adam_response_name(u8 response)
+{
+    switch (response)
+    {
+        case AdamNet::ResponseSuccess: return "SUCCESS";
+        case AdamNet::ResponsePrinterBusy: return "PRINTER_BUSY";
+        case AdamNet::ResponseKeyboardEmpty: return "KEYBOARD_EMPTY";
+        case AdamNet::ResponseDeviceError: return "DEVICE_ERROR";
+        case AdamNet::ResponseTimeout: return "TIMEOUT";
+        default: return "PCB_RESPONSE";
+    }
+}
+
 void trace_logger_format_entry(const GC_Trace_Entry& entry,
     const GC_Trace_Format_Options& options, char* buffer, size_t buffer_size)
 {
@@ -244,6 +285,28 @@ void trace_logger_format_entry(const GC_Trace_Entry& entry,
                              entry.vdp.address, entry.vdp.raw, entry.vdp.auxiliary,
                              entry.vdp.line, entry.vdp.hpos);
                     break;
+                case TRACE_VDP_SPRITE_BUDGET:
+                case TRACE_VDP_SPRITE_LIMIT:
+                {
+                    int dropped = MAX(0, (int)entry.vdp.auxiliary - (int)entry.vdp.effective);
+                    if (entry.vdp.event == TRACE_VDP_SPRITE_LIMIT)
+                        snprintf(text, sizeof(text), "[VDP] SPRITES LIMIT HIT Line:%u Count:%u/%u Dropped:%d",
+                                 entry.vdp.line, entry.vdp.auxiliary, entry.vdp.raw, dropped);
+                    else if (entry.vdp.auxiliary > entry.vdp.raw)
+                        snprintf(text, sizeof(text), "[VDP] SPRITES Line:%u Count:%u/%u LIMIT HIT Dropped:%d",
+                                 entry.vdp.line, entry.vdp.auxiliary, entry.vdp.raw, dropped);
+                    else
+                        snprintf(text, sizeof(text), "[VDP] SPRITES Line:%u Count:%u/%u",
+                                 entry.vdp.line, entry.vdp.auxiliary, entry.vdp.raw);
+                    break;
+                }
+                case TRACE_VDP_MISSED_VBLANK:
+                {
+                    const char* access = entry.vdp.raw == 0x03 ? "R/W" : (entry.vdp.raw == 0x02 ? "W" : "R");
+                    snprintf(text, sizeof(text), "[VDP] VBLANK MISSED Watch:$%04X %s Consecutive:%u",
+                             entry.vdp.address, access, entry.vdp.auxiliary);
+                    break;
+                }
                 default:
                     snprintf(text, sizeof(text), "[VDP] UNKNOWN Event:$%02X", entry.vdp.event);
                     break;
@@ -395,6 +458,54 @@ void trace_logger_format_entry(const GC_Trace_Entry& entry,
                 snprintf(text, sizeof(text), "[SGM] CONTROL Port:$%02X Write:$%02X",
                          entry.sgm.port, entry.sgm.raw);
             break;
+        case TRACE_ADAM:
+        {
+            if (entry.adam.event == TRACE_ADAM_MAP)
+            {
+                snprintf(text, sizeof(text), "[ADAM] %s Write:$%02X->$%02X%s",
+                    entry.adam.target == 0 ? "MIOC" : "CONTROL", entry.adam.old_value,
+                    entry.adam.new_value, entry.adam.error ? " ADAMnet reset" : "");
+            }
+            else if (entry.adam.pcb)
+            {
+                snprintf(text, sizeof(text), "[ADAM] PCB %s Command:$%02X Address:$%04X "
+                    "Count:%u%s%s", entry.adam.event == TRACE_ADAM_COMMAND_ACCEPT ?
+                    "ACCEPT" : (entry.adam.event == TRACE_ADAM_COMMAND_COMPLETE ?
+                    "COMPLETE" : "ERROR"), entry.adam.command, entry.adam.buffer,
+                    entry.adam.length, entry.adam.response ? " Response:" : "",
+                    entry.adam.response ? adam_response_name(entry.adam.response) : "");
+            }
+            else if (entry.adam.event == TRACE_ADAM_DMA_COMPLETE)
+            {
+                snprintf(text, sizeof(text), "[ADAM] DMA %s Device:%s($%02X) DCB:%u "
+                    "Block:%u Buffer:$%04X Length:%u", adam_command_name(entry.adam.command),
+                    adam_device_name(entry.adam.device), entry.adam.device, entry.adam.dcb,
+                    entry.adam.block, entry.adam.buffer, entry.adam.length);
+            }
+            else
+            {
+                if (entry.adam.event == TRACE_ADAM_COMMAND_ACCEPT)
+                {
+                    snprintf(text, sizeof(text), "[ADAM] DCB ACCEPT Device:%s($%02X) DCB:%u "
+                        "Command:%s Block:%u Buffer:$%04X Length:%u",
+                        adam_device_name(entry.adam.device), entry.adam.device, entry.adam.dcb,
+                        adam_command_name(entry.adam.command), entry.adam.block,
+                        entry.adam.buffer, entry.adam.length);
+                }
+                else
+                {
+                    snprintf(text, sizeof(text), "[ADAM] DCB %s Device:%s($%02X) DCB:%u "
+                        "Command:%s Block:%u Buffer:$%04X Length:%u Response:%s($%02X) Error:%s",
+                        entry.adam.event == TRACE_ADAM_COMMAND_COMPLETE ? "COMPLETE" : "ERROR",
+                        adam_device_name(entry.adam.device), entry.adam.device, entry.adam.dcb,
+                        adam_command_name(entry.adam.command), entry.adam.block,
+                        entry.adam.buffer, entry.adam.length,
+                        adam_response_name(entry.adam.response), entry.adam.response,
+                        adam_error_name(entry.adam.error));
+                }
+            }
+            break;
+        }
         case TRACE_MAPPER:
         {
             if (entry.mapper.event == TRACE_MAPPER_BANK)

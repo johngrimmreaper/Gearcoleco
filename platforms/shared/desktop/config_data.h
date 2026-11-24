@@ -24,10 +24,10 @@
 #include <string>
 #include "gearcoleco.h"
 
-static const int config_version = 7;
+static const int config_version = 10;
 static const int config_minimum_version = 2;
 static const int config_max_recent_roms = 15;
-static const int config_memory_editor_count = 5;
+static const int config_memory_editor_count = 7;
 
 enum config_ShaderMode
 {
@@ -49,6 +49,43 @@ enum config_VideoSync
     config_VideoSync_VRR = 2
 };
 
+struct config_AdamKeyDefinition
+{
+    const char* name;
+    const char* setting;
+    GC_AdamKey key;
+    SDL_Scancode default_scancode;
+};
+
+static const config_AdamKeyDefinition config_adam_keys[] =
+{
+    { "SmartKey I", "SmartKey1", GC_ADAM_KEY_SMART_1, SDL_SCANCODE_F1 },
+    { "SmartKey II", "SmartKey2", GC_ADAM_KEY_SMART_2, SDL_SCANCODE_F2 },
+    { "SmartKey III", "SmartKey3", GC_ADAM_KEY_SMART_3, SDL_SCANCODE_F3 },
+    { "SmartKey IV", "SmartKey4", GC_ADAM_KEY_SMART_4, SDL_SCANCODE_F4 },
+    { "SmartKey V", "SmartKey5", GC_ADAM_KEY_SMART_5, SDL_SCANCODE_F5 },
+    { "SmartKey VI", "SmartKey6", GC_ADAM_KEY_SMART_6, SDL_SCANCODE_F6 },
+    { "Wild Card", "WildCard", GC_ADAM_KEY_WILD_CARD, SDL_SCANCODE_F8 },
+    { "Undo", "Undo", GC_ADAM_KEY_UNDO, SDL_SCANCODE_F7 },
+    { "ADAM Home", "Home", GC_ADAM_KEY_HOME, SDL_SCANCODE_HOME },
+    { "Move / Copy", "Move", GC_ADAM_KEY_MOVE, SDL_SCANCODE_PAGEUP },
+    { "Store / Fetch", "Store", GC_ADAM_KEY_STORE, SDL_SCANCODE_PAGEDOWN },
+    { "Insert", "Insert", GC_ADAM_KEY_INSERT, SDL_SCANCODE_INSERT },
+    { "Print", "Print", GC_ADAM_KEY_PRINT, SDL_SCANCODE_PRINTSCREEN },
+    { "Clear", "Clear", GC_ADAM_KEY_CLEAR, SDL_SCANCODE_END },
+    { "Delete", "Delete", GC_ADAM_KEY_DELETE, SDL_SCANCODE_DELETE },
+    { "Escape / WP", "Escape", GC_ADAM_KEY_ESCAPE, SDL_SCANCODE_ESCAPE }
+};
+
+static const int config_adam_key_count = sizeof(config_adam_keys) / sizeof(config_adam_keys[0]);
+
+enum config_AdamController
+{
+    config_AdamController_None = 0,
+    config_AdamController_Keyboard,
+    config_AdamController_Gamepad
+};
+
 struct config_Emulator
 {
     bool maximized;
@@ -66,25 +103,49 @@ struct config_Emulator
     int runahead;
     int mapper;
     int region;
+    int machine;
+    int adam_boot_mode;
     bool show_info;
     std::string recent_roms[config_max_recent_roms];
     std::string bios_path;
+    std::string adam_eos_path;
+    std::string adam_smartwriter_path;
+    SDL_Scancode adam_keys[config_adam_key_count];
+    bool adam_media_persistence;
+    std::string adam_recent_media[GC_ADAM_MEDIA_SLOT_COUNT][5];
+    bool adam_media_write_protected[GC_ADAM_MEDIA_SLOT_COUNT];
+    int adam_controller[2];
     int savefiles_dir_option;
     std::string savefiles_path;
     int savestates_dir_option;
     std::string savestates_path;
     int screenshots_dir_option;
+    int video_recordings_dir_option;
     std::string screenshots_path;
-    std::string last_open_path;
+    std::string video_recordings_path;
     int window_width;
     int window_height;
     int spinner;
     int spinner_sensitivity;
-    bool capture_mouse;
-    bool status_messages;
+    bool allow_shared_gamepads;
+    bool show_notifications;
+    int notification_duration;
     bool allow_screensaver;
     int mcp_tcp_port;
     std::string mcp_http_address;
+};
+
+struct config_FileDialogs
+{
+    std::string rom;
+    std::string ram;
+    std::string states;
+    std::string screenshots;
+    std::string recordings;
+    std::string debug;
+    std::string bios;
+    std::string adam_media;
+    std::string adam_printer;
 };
 
 struct config_Video
@@ -102,6 +163,9 @@ struct config_Video
     int palette;
     int shader_mode;
     std::string shader_preset_path;
+    int recording_scale;
+    int recording_ratio;
+    int recording_quality;
     GC_Color color[16];
 };
 
@@ -170,18 +234,28 @@ struct config_Input
 
 enum config_HotkeyIndex
 {
-    config_HotkeyIndex_OpenROM = 0,
+    config_HotkeyIndex_GameFocus = 0,
+    config_HotkeyIndex_KeyboardMapper,
+    config_HotkeyIndex_KeyMapping,
+    config_HotkeyIndex_Fullscreen,
+    config_HotkeyIndex_ShowMainMenu,
+    config_HotkeyIndex_OpenROM,
     config_HotkeyIndex_ReloadROM,
     config_HotkeyIndex_Quit,
     config_HotkeyIndex_Reset,
     config_HotkeyIndex_Pause,
     config_HotkeyIndex_FFWD,
+    config_HotkeyIndex_Rewind,
     config_HotkeyIndex_SaveState,
     config_HotkeyIndex_LoadState,
+    config_HotkeyIndex_SelectSlot1,
+    config_HotkeyIndex_SelectSlot2,
+    config_HotkeyIndex_SelectSlot3,
+    config_HotkeyIndex_SelectSlot4,
+    config_HotkeyIndex_SelectSlot5,
     config_HotkeyIndex_Screenshot,
-    config_HotkeyIndex_Fullscreen,
-    config_HotkeyIndex_CaptureMouse,
-    config_HotkeyIndex_ShowMainMenu,
+    config_HotkeyIndex_VideoRecording,
+    config_HotkeyIndex_Mute,
     config_HotkeyIndex_DebugStepInto,
     config_HotkeyIndex_DebugStepOver,
     config_HotkeyIndex_DebugStepOut,
@@ -191,13 +265,6 @@ enum config_HotkeyIndex
     config_HotkeyIndex_DebugRunToCursor,
     config_HotkeyIndex_DebugBreakpoint,
     config_HotkeyIndex_DebugGoBack,
-    config_HotkeyIndex_SelectSlot1,
-    config_HotkeyIndex_SelectSlot2,
-    config_HotkeyIndex_SelectSlot3,
-    config_HotkeyIndex_SelectSlot4,
-    config_HotkeyIndex_SelectSlot5,
-    config_HotkeyIndex_Rewind,
-    config_HotkeyIndex_Mute,
     config_HotkeyIndex_COUNT
 };
 
@@ -222,6 +289,7 @@ struct config_Debug
     bool show_call_stack;
     bool show_breakpoints;
     bool show_symbols;
+    bool show_profiler;
     bool show_memory;
     bool show_video;
     bool show_tms9918a_nametable;
@@ -237,6 +305,9 @@ struct config_Debug
     bool show_f18a_extended_regs;
     bool show_psg;
     bool show_ay8910;
+    bool show_adam_system;
+    bool show_adam_net;
+    bool show_adam_printer;
     bool show_trace_logger;
     bool show_rewind;
     bool trace_counter;
@@ -251,6 +322,7 @@ struct config_Debug
     bool trace_psg;
     bool trace_ay8910;
     bool trace_sgm;
+    bool trace_adam;
     bool trace_vdp;
     bool trace_input;
     bool trace_io;
@@ -261,7 +333,10 @@ struct config_Debug
     int trace_io_events;
     int trace_input_events;
     int trace_sgm_events;
+    int trace_adam_events;
     int trace_mapper_events;
+    int trace_vblank_watch_address;
+    int trace_vblank_watch_operation;
     int trace_output;
     int trace_capacity;
     int trace_disk_dir_option;
@@ -277,8 +352,10 @@ struct config_Debug
     bool dis_replace_labels;
     int dis_syntax;
     int dis_look_ahead_count;
+    int font_type;
     int font_size;
     int scale;
+    int overscan;
     bool multi_viewport;
     bool single_instance;
     bool auto_debug_settings;
@@ -290,6 +367,7 @@ struct config_Debug
 };
 
 EXTERN config_Emulator config_emulator;
+EXTERN config_FileDialogs config_file_dialogs;
 EXTERN config_Video config_video;
 EXTERN config_Audio config_audio;
 EXTERN config_Rewind config_rewind;

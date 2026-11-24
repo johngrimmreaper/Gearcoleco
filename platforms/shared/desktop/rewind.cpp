@@ -21,12 +21,15 @@
 #include "emu.h"
 #include "config.h"
 #include "events.h"
+#include "Adam.h"
+#include "AdamNet.h"
 
 #define REWIND_IMPORT
 #include "rewind.h"
 
 static u8* buffer = NULL;
 static size_t sizes[REWIND_MAX_SNAPSHOTS] = { 0 };
+static std::stack<Processor::GC_CallStackEntry> call_stacks[REWIND_MAX_SNAPSHOTS];
 static int head = 0;
 static int count = 0;
 static int capacity = 0;
@@ -36,11 +39,16 @@ static bool storage_dirty = true;
 static int seek_age = -1;
 static size_t slot_size = 0;
 static size_t allocated_size = 0;
+static size_t estimated_size = 0;
+static int estimated_capacity = 0;
+static bool capacity_limited = false;
 static int snapshot_width = 0;
 static int snapshot_height = 0;
+static const size_t kAdamRewindMemoryLimit = 512U * 1024U * 1024U;
 
 static int slot_at(int age);
 static int get_target_capacity(void);
+static int get_effective_capacity(size_t target_slot_size);
 static size_t get_target_slot_size(void);
 static bool ensure_storage(void);
 static void release_storage(void);
@@ -62,6 +70,9 @@ void rewind_destroy(void)
     active = false;
     storage_dirty = true;
     seek_age = -1;
+    estimated_size = 0;
+    estimated_capacity = 0;
+    capacity_limited = false;
 }
 
 void rewind_reset(void)
@@ -72,6 +83,10 @@ void rewind_reset(void)
     active = false;
     storage_dirty = true;
     seek_age = -1;
+    estimated_size = 0;
+    estimated_capacity = 0;
+    capacity_limited = false;
+
     for (int i = 0; i < REWIND_MAX_SNAPSHOTS; i++)
         sizes[i] = 0;
 
@@ -80,6 +95,10 @@ void rewind_reset(void)
         release_storage();
         return;
     }
+
+    size_t target_slot_size = get_target_slot_size();
+    if (target_slot_size > 0)
+        get_effective_capacity(target_slot_size);
 }
 
 void rewind_push(void)
@@ -97,8 +116,7 @@ void rewind_push(void)
     frame_accum = 0;
 
     GC_RuntimeInfo runtime;
-    if (emu_get_core()->GetRuntimeInfo(runtime) &&
-        ((runtime.screen_width != snapshot_width) || (runtime.screen_height != snapshot_height)))
+    if (emu_get_core()->GetRuntimeInfo(runtime) && ((runtime.screen_width != snapshot_width) || (runtime.screen_height != snapshot_height)))
     {
         storage_dirty = true;
     }
@@ -124,6 +142,11 @@ void rewind_push(void)
         }
     }
 
+    if (config_debug.debug)
+        call_stacks[head] = *emu_get_core()->GetProcessor()->GetDisassemblerCallStack();
+    else
+        call_stacks[head] = std::stack<Processor::GC_CallStackEntry>();
+
     sizes[head] = size;
     head = (head + 1) % capacity;
     if (count < capacity)
@@ -145,6 +168,8 @@ bool rewind_pop(void)
 
     if (ok)
     {
+        emu_debug_state_restored();
+        *emu_get_core()->GetProcessor()->GetDisassemblerCallStack() = call_stacks[idx];
         restore_screenshot(slot, size);
         events_sync_input();
     }
@@ -182,6 +207,16 @@ size_t rewind_get_memory_usage(void)
     return allocated_size;
 }
 
+size_t rewind_get_estimated_memory_usage(void)
+{
+    return estimated_size;
+}
+
+bool rewind_is_capacity_limited(void)
+{
+    return capacity_limited;
+}
+
 bool rewind_seek(int age)
 {
     if (age < 0 || age >= count)
@@ -197,6 +232,8 @@ bool rewind_seek(int age)
 
     if (ok)
     {
+        emu_debug_state_restored();
+        *emu_get_core()->GetProcessor()->GetDisassemblerCallStack() = call_stacks[idx];
         restore_screenshot(slot, size);
         events_sync_input();
         seek_age = age;
@@ -207,7 +244,7 @@ bool rewind_seek(int age)
 
 int rewind_get_capacity(void)
 {
-    return get_target_capacity();
+    return estimated_capacity;
 }
 
 int rewind_get_frames_per_snapshot(void)
@@ -238,6 +275,22 @@ static int get_target_capacity(void)
     return target;
 }
 
+static int get_effective_capacity(size_t target_slot_size)
+{
+    int target = get_target_capacity();
+    capacity_limited = false;
+
+    if ((emu_get_machine() == GC_MACHINE_ADAM) && (target_slot_size > 0) && ((size_t)target > (kAdamRewindMemoryLimit / target_slot_size)))
+    {
+        target = (int)(kAdamRewindMemoryLimit / target_slot_size);
+        capacity_limited = true;
+    }
+
+    estimated_capacity = target;
+    estimated_size = target > 0 ? (size_t)target * target_slot_size : 0;
+    return target;
+}
+
 static size_t get_target_slot_size(void)
 {
     if (emu_is_empty())
@@ -246,6 +299,13 @@ static size_t get_target_slot_size(void)
     size_t target_slot_size = 0;
     if (!emu_get_core()->SaveState(NULL, target_slot_size, true))
         return 0;
+
+    if (emu_get_machine() == GC_MACHINE_ADAM)
+    {
+        // Printing can grow a state without changing media or resetting rewind
+        AdamNet* adam_net = emu_get_core()->GetAdam()->GetAdamNet();
+        target_slot_size += AdamNet::kPrinterSpoolSize - adam_net->GetPrinterSize();
+    }
 
     return target_slot_size;
 }
@@ -258,13 +318,21 @@ static bool ensure_storage(void)
         return false;
     }
 
-    int target_capacity = get_target_capacity();
+    int target_capacity = get_effective_capacity(slot_size);
     if (!storage_dirty && IsValidPointer(buffer) && (capacity == target_capacity))
         return true;
 
     size_t target_slot_size = get_target_slot_size();
     if (target_slot_size == 0)
         return false;
+
+    target_capacity = get_effective_capacity(target_slot_size);
+    if (target_capacity < 1)
+    {
+        Log("Rewind: ADAM state exceeds the %zu MB rewind memory limit", kAdamRewindMemoryLimit / (1024U * 1024U));
+        release_storage();
+        return false;
+    }
 
     GC_RuntimeInfo runtime;
     bool runtime_valid = emu_get_core()->GetRuntimeInfo(runtime);
@@ -276,12 +344,14 @@ static bool ensure_storage(void)
             snapshot_width = runtime.screen_width;
             snapshot_height = runtime.screen_height;
         }
+
         storage_dirty = false;
         return true;
     }
 
     size_t target_size = (size_t)target_capacity * target_slot_size;
     u8* new_buffer = new (std::nothrow) u8[target_size];
+
     if (!IsValidPointer(new_buffer))
     {
         Log("Rewind: failed to allocate %zu bytes", target_size);
@@ -323,6 +393,9 @@ static void release_storage(void)
     capacity = 0;
     snapshot_width = 0;
     snapshot_height = 0;
+
+    for (int i = 0; i < REWIND_MAX_SNAPSHOTS; i++)
+        call_stacks[i] = std::stack<Processor::GC_CallStackEntry>();
 }
 
 static void truncate_to_seek_position(void)

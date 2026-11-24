@@ -18,24 +18,33 @@
  */
 
 #include "mcp_debug_adapter.h"
+#include "Adam.h"
+#include "AdamNet.h"
 #include "F18AGPU.h"
 #include "Input.h"
+#include "KeyMap.h"
+#include "KeyMapper.h"
 #include "log.h"
 #include "../utils.h"
 #include "../emu.h"
 #include "../gui.h"
 #include "../gui_actions.h"
+#include "../gui_adam.h"
 #include "../gui_debug_disassembler.h"
 #include "../gui_debug_memory.h"
 #include "../gui_debug_memeditor.h"
 #include "../gui_debug_rewind.h"
 #include "../gui_debug_trace_logger.h"
+#include "../gui_debug_profiler.h"
 #include "../trace_logger_formatter.h"
 #include "../config.h"
 #include "../events.h"
 #include "../rewind.h"
+#include "../video_recorder.h"
 #include "../runahead.h"
 #include <cstring>
+#include <cctype>
+#include <cmath>
 #include <sstream>
 #include <iomanip>
 #include <vector>
@@ -46,6 +55,172 @@ struct DisassemblerBookmark
     u16 address;
     char name[32];
 };
+
+static std::string AdamHex(u64 value, int width)
+{
+    std::ostringstream text;
+    text << std::hex << std::uppercase << std::setfill('0') << std::setw(width) << value;
+    return text.str();
+}
+
+static const char* AdamMemorySourceName(int source)
+{
+    switch ((Adam::MemorySource)source)
+    {
+        case Adam::MemorySourceRAM: return "ram";
+        case Adam::MemorySourceOS7: return "os7";
+        case Adam::MemorySourceEOS: return "eos";
+        case Adam::MemorySourceSmartWriter: return "smartwriter";
+        case Adam::MemorySourceCartridge: return "cartridge";
+        case Adam::MemorySourceOpenBus:
+        default: return "open_bus";
+    }
+}
+
+static const char* AdamControllerStateName(int state)
+{
+    switch ((GC_AdamNetControllerState)state)
+    {
+        case GC_ADAMNET_CONTROLLER_INITIALIZING: return "initializing";
+        case GC_ADAMNET_CONTROLLER_IDLE: return "idle";
+        case GC_ADAMNET_CONTROLLER_BUSY: return "busy";
+        default: return "unknown";
+    }
+}
+
+static const char* AdamCommandStatusName(u8 value)
+{
+    switch (value)
+    {
+        case AdamNet::CommandIdle: return "idle";
+        case AdamNet::CommandStatus: return "status";
+        case AdamNet::CommandSoftReset: return "soft_reset";
+        case AdamNet::CommandWrite: return "write";
+        case AdamNet::CommandRead: return "read";
+        case AdamNet::ResponseSuccess: return "success";
+        case AdamNet::ResponsePrinterBusy: return "printer_busy";
+        case AdamNet::ResponseKeyboardEmpty: return "keyboard_empty";
+        case AdamNet::ResponseDeviceError: return "device_error";
+        case AdamNet::ResponseTimeout: return "timeout";
+        default: return (value >= 0x80) && (value <= 0x85) ? "pcb_response" : "unknown";
+    }
+}
+
+static const char* AdamMediaTypeName(int type)
+{
+    switch ((GC_AdamMediaType)type)
+    {
+        case GC_ADAM_MEDIA_DATA_PACK: return "data_pack";
+        case GC_ADAM_MEDIA_DISK: return "disk";
+        case GC_ADAM_MEDIA_NONE:
+        default: return "none";
+    }
+}
+
+static const char* AdamContentTypeName(int type)
+{
+    switch ((GC_ContentType)type)
+    {
+        case GC_CONTENT_CARTRIDGE: return "cartridge";
+        case GC_CONTENT_ADAM_DATA_PACK: return "data_pack";
+        case GC_CONTENT_ADAM_DISK: return "disk";
+        case GC_CONTENT_NONE:
+        default: return "none";
+    }
+}
+
+static const char* AdamDCBDeviceTypeName(u8 type)
+{
+    if (type == 0)
+        return "character";
+    if (type == 1)
+        return "block";
+    return "unknown";
+}
+
+static u8 AdamNodeStatusValue(u8 value, u8 device_id)
+{
+    const AdamNet::DeviceMetadata* device = AdamNet::GetDeviceMetadata(device_id);
+    u8 shift = IsValidPointer(device) ? device->status_shift : 0;
+    return (value >> shift) & 0x0F;
+}
+
+static const char* AdamNodeStatusName(u8 value)
+{
+    switch (value)
+    {
+        case 0: return "ready";
+        case 1: return "crc_error";
+        case 2: return "block_not_found";
+        case 3: return "no_media";
+        case 4: return "no_device";
+        case 5: return "write_protected";
+        default: return "unknown";
+    }
+}
+
+static const char* AdamMediaSlotName(int slot)
+{
+    static const char* names[GC_ADAM_MEDIA_SLOT_COUNT] =
+    {
+        "disk_1", "disk_2", "data_pack_1", "data_pack_2"
+    };
+    return (slot >= 0) && (slot < GC_ADAM_MEDIA_SLOT_COUNT) ? names[slot] : "none";
+}
+
+static std::string AdamKeyName(int key)
+{
+    static const char* names[] =
+    {
+        "space", "minus", "plus", "caret", "semicolon", "quote", "open_bracket",
+        "close_bracket", "backslash", "comma", "period", "slash", "return", "escape",
+        "backspace", "tab", "home", "smart_1", "smart_2", "smart_3", "smart_4",
+        "smart_5", "smart_6", "wild_card", "undo", "move", "store", "insert", "print",
+        "clear", "delete", "up", "right", "down", "left", "shift", "control", "lock"
+    };
+
+    if ((key >= GC_ADAM_KEY_A) && (key <= GC_ADAM_KEY_Z))
+        return std::string(1, (char)('a' + key - GC_ADAM_KEY_A));
+    if ((key >= GC_ADAM_KEY_0) && (key <= GC_ADAM_KEY_9))
+        return std::string(1, (char)('0' + key - GC_ADAM_KEY_0));
+    if ((key >= GC_ADAM_KEY_SPACE) && (key < GC_ADAM_KEY_COUNT))
+        return names[key - GC_ADAM_KEY_SPACE];
+    return "none";
+}
+
+static json AdamFirmwareError(bool adam)
+{
+    json result;
+    result["error"] = adam ? "ADAM firmware is missing or invalid" :
+        "ColecoVision OS-7 firmware is missing or invalid";
+    result["error_code"] = "missing_or_invalid_firmware";
+    result["machine"] = adam ? "ADAM" : "ColecoVision";
+    json firmware_info = json::array();
+    int count = adam ? GC_ADAM_FIRMWARE_COUNT : 1;
+    for (int i = 0; i < count; i++)
+    {
+        GC_AdamFirmware firmware = (GC_AdamFirmware)i;
+        const Adam::FirmwareMetadata* metadata = Adam::GetFirmwareMetadata(firmware);
+        char path[4096];
+        size_t actual_size = 0;
+        u32 crc = 0;
+        emu_get_adam_firmware_path(firmware, path, sizeof(path));
+        bool valid = emu_inspect_adam_firmware(firmware, path, &actual_size, &crc);
+        std::ostringstream crc_text;
+        crc_text << std::hex << std::uppercase << std::setfill('0') << std::setw(8) << crc;
+        firmware_info.push_back({
+            {"role", metadata->role_name},
+            {"path", path},
+            {"expected_size", metadata->size},
+            {"actual_size", actual_size},
+            {"crc32", actual_size > 0 ? crc_text.str() : ""},
+            {"valid", valid},
+            {"known_revision", valid && (crc == metadata->crc)}
+        });
+    }
+    result["firmware"] = firmware_info;
+    return result;
+}
 
 static int MemoryEditorOffsetToDisplayAddress(const MemoryAreaInfo& info, int offset)
 {
@@ -59,7 +234,8 @@ static int MemoryEditorDisplayAddressToOffset(const MemoryAreaInfo& info, int ad
 
 static bool NormalizeMemoryAreaAddress(const MemoryAreaInfo& info, u32 address, u32* offset)
 {
-    if (!IsValidPointer(offset) || !IsValidPointer(info.data) || info.size == 0)
+    if (!IsValidPointer(offset) || (!IsValidPointer(info.data) && !info.virtual_area) ||
+        (info.size == 0))
         return false;
 
     u64 display_start = info.display_base;
@@ -212,7 +388,6 @@ std::vector<BreakpointInfo> DebugAdapter::ListBreakpoints()
     {
         BreakpointInfo info;
         info.enabled = brk.enabled;
-        info.type = brk.type;
         info.address1 = brk.address1;
         info.address2 = brk.address2;
         info.read = brk.read;
@@ -224,40 +399,6 @@ std::vector<BreakpointInfo> DebugAdapter::ListBreakpoints()
     }
 
     return result;
-}
-
-RegistersSnapshot DebugAdapter::GetRegisters()
-{
-    Debug("[MCP] GetRegisters: start");
-
-    Processor* cpu = m_core->GetProcessor();
-    Processor::ProcessorState* state = cpu->GetState();
-
-    Debug("[MCP] GetRegisters: creating snapshot");
-    RegistersSnapshot snapshot;
-
-    snapshot.AF = state->AF->GetValue();
-    snapshot.BC = state->BC->GetValue();
-    snapshot.DE = state->DE->GetValue();
-    snapshot.HL = state->HL->GetValue();
-    snapshot.AF2 = state->AF2->GetValue();
-    snapshot.BC2 = state->BC2->GetValue();
-    snapshot.DE2 = state->DE2->GetValue();
-    snapshot.HL2 = state->HL2->GetValue();
-    snapshot.IX = state->IX->GetValue();
-    snapshot.IY = state->IY->GetValue();
-    snapshot.SP = state->SP->GetValue();
-    snapshot.PC = state->PC->GetValue();
-    snapshot.WZ = state->WZ->GetValue();
-    snapshot.I = *state->I;
-    snapshot.R = *state->R;
-    snapshot.IFF1 = *state->IFF1;
-    snapshot.IFF2 = *state->IFF2;
-    snapshot.Halt = *state->Halt;
-    snapshot.InterruptMode = *state->InterruptMode;
-
-    Debug("[MCP] GetRegisters: done (PC=%04X)", snapshot.PC);
-    return snapshot;
 }
 
 void DebugAdapter::SetRegister(const std::string& name, u32 value)
@@ -320,7 +461,7 @@ std::vector<MemoryAreaInfo> DebugAdapter::ListMemoryAreas()
     for (int i = 0; i < MEMORY_EDITOR_MAX; i++)
     {
         MemoryAreaInfo info = GetMemoryAreaInfo(i);
-        if (info.data != NULL && info.size > 0)
+        if ((info.data != NULL || info.virtual_area) && info.size > 0)
         {
             result.push_back(info);
         }
@@ -334,7 +475,7 @@ std::vector<u8> DebugAdapter::ReadMemoryArea(int area, u32 offset, size_t size)
     std::vector<u8> result;
     MemoryAreaInfo info = GetMemoryAreaInfo(area);
 
-    if (info.data == NULL || offset >= info.size)
+    if ((info.data == NULL && !info.virtual_area) || offset >= info.size)
         return result;
 
     u32 bytes_to_read = (u32)size;
@@ -343,23 +484,44 @@ std::vector<u8> DebugAdapter::ReadMemoryArea(int area, u32 offset, size_t size)
 
     for (u32 i = 0; i < bytes_to_read; i++)
     {
-        result.push_back(info.data[offset + i]);
+        if (info.virtual_area)
+            result.push_back(m_core->GetAdam()->DebugReadMemory((u16)(offset + i)));
+        else
+            result.push_back(info.data[offset + i]);
     }
 
     return result;
 }
 
-void DebugAdapter::WriteMemoryArea(int area, u32 offset, const std::vector<u8>& data)
+size_t DebugAdapter::WriteMemoryArea(int area, u32 offset, const std::vector<u8>& data)
 {
     MemoryAreaInfo info = GetMemoryAreaInfo(area);
 
-    if (info.data == NULL || offset >= info.size)
-        return;
+    if ((info.data == NULL && !info.virtual_area) || offset >= info.size)
+        return 0;
 
-    for (size_t i = 0; i < data.size() && (offset + i) < info.size; i++)
+    size_t bytes_to_write = data.size();
+    if (offset + bytes_to_write > info.size)
+        bytes_to_write = info.size - offset;
+
+    if (info.virtual_area)
     {
-        info.data[offset + i] = data[i];
+        for (size_t i = 0; i < bytes_to_write; i++)
+            if (!m_core->GetAdam()->CanWriteMemory((u16)(offset + i)))
+                return 0;
     }
+
+    for (size_t i = 0; i < bytes_to_write; i++)
+    {
+        if (info.virtual_area)
+        {
+            if (!m_core->GetAdam()->DebugWriteMemory((u16)(offset + i), data[i]))
+                return i;
+        }
+        else
+            info.data[offset + i] = data[i];
+    }
+    return bytes_to_write;
 }
 
 std::vector<DisasmLine> DebugAdapter::GetDisassembly(u16 start_address, u16 end_address, int bank, bool resolve_symbols)
@@ -430,9 +592,6 @@ std::vector<DisasmLine> DebugAdapter::GetDisassembly(u16 start_address, u16 end_
             line.size = record->size;
             line.jump = record->jump;
             line.jump_address = record->jump_address;
-            line.jump_bank = record->jump_bank;
-            line.has_operand_address = record->has_operand_address;
-            line.operand_address = record->operand_address;
             line.subroutine = record->subroutine;
             line.irq = record->irq;
 
@@ -499,6 +658,7 @@ MemoryAreaInfo DebugAdapter::GetMemoryAreaInfo(int area)
     info.data = NULL;
     info.size = 0;
     info.display_base = 0;
+    info.virtual_area = false;
 
     Memory* memory = m_core->GetMemory();
     Cartridge* cart = m_core->GetCartridge();
@@ -507,17 +667,23 @@ MemoryAreaInfo DebugAdapter::GetMemoryAreaInfo(int area)
     switch (area)
     {
         case MEMORY_EDITOR_BIOS:
+            if (m_core->GetMachine() == GC_MACHINE_ADAM)
+                break;
             info.name = "BIOS";
             info.data = memory->GetBios();
             info.size = 0x2000;
             break;
         case MEMORY_EDITOR_RAM:
+            if (m_core->GetMachine() == GC_MACHINE_ADAM)
+                break;
             info.name = "RAM";
             info.data = memory->GetRam();
             info.size = 0x400;
             info.display_base = 0x6000;
             break;
         case MEMORY_EDITOR_SGM_RAM:
+            if (m_core->GetMachine() == GC_MACHINE_ADAM)
+                break;
             info.name = "SGM RAM";
             info.data = memory->GetSGMRam();
             info.size = 0x8000;
@@ -532,6 +698,20 @@ MemoryAreaInfo DebugAdapter::GetMemoryAreaInfo(int area)
             info.data = cart->GetROM();
             info.size = cart->GetROMSize();
             break;
+        case MEMORY_EDITOR_ADAM_MAPPED:
+            if (m_core->GetMachine() != GC_MACHINE_ADAM)
+                break;
+            info.name = "CPU MAP";
+            info.size = 0x10000;
+            info.virtual_area = true;
+            break;
+        case MEMORY_EDITOR_ADAM_RAM:
+            if (m_core->GetMachine() != GC_MACHINE_ADAM)
+                break;
+            info.name = "ADAM RAM";
+            info.data = m_core->GetAdam()->GetMainRAM();
+            info.size = Adam::kMainRAMSize;
+            break;
         default:
             break;
     }
@@ -542,11 +722,98 @@ MemoryAreaInfo DebugAdapter::GetMemoryAreaInfo(int area)
 json DebugAdapter::GetMediaInfo()
 {
     json info;
-    Cartridge* cart = m_core->GetCartridge();
 
     info["emulator"] = GEARCOLECO_TITLE;
     info["emulator_version"] = GEARCOLECO_VERSION;
-    info["ready"] = cart->IsReady();
+    info["ready"] = m_core->IsReady();
+
+    if (m_core->GetMachine() == GC_MACHINE_ADAM)
+    {
+        static const char* slot_names[GC_ADAM_MEDIA_SLOT_COUNT] = {
+            "disk_1", "disk_2", "data_pack_1", "data_pack_2"
+        };
+        static const char* content_names[] = {
+            "none", "cartridge", "data_pack", "disk"
+        };
+
+        info["machine"] = "ADAM";
+        info["boot_mode"] = m_core->GetAdamBootMode() == GC_ADAM_BOOT_CARTRIDGE ?
+            "cartridge" : "computer";
+        int content_type = (int)m_core->GetContentType();
+        info["content_type"] = (content_type >= 0 && content_type < 4) ?
+            content_names[content_type] : "unknown";
+        info["file_path"] = emu_get_content_path();
+        info["file_name"] = emu_get_content_name();
+        info["is_pal"] = false;
+
+        json firmware = json::array();
+        for (int i = 0; i < GC_ADAM_FIRMWARE_COUNT; i++)
+        {
+            const Adam::FirmwareMetadata* metadata =
+                Adam::GetFirmwareMetadata((GC_AdamFirmware)i);
+            std::ostringstream crc;
+            crc << std::hex << std::uppercase << std::setfill('0') << std::setw(8)
+                << m_core->GetAdam()->GetFirmwareCRC((GC_AdamFirmware)i);
+            firmware.push_back({
+                {"role", metadata->role_name},
+                {"loaded", m_core->GetAdam()->GetFirmwareCRC((GC_AdamFirmware)i) != 0},
+                {"crc", crc.str()}
+            });
+        }
+        info["firmware"] = firmware;
+
+        json devices = json::array();
+        for (int i = 0; i < AdamNet::GetDeviceCount(); i++)
+        {
+            const AdamNet::DeviceMetadata* device = AdamNet::GetDeviceMetadataByIndex(i);
+            std::ostringstream id;
+            id << std::hex << std::uppercase << std::setfill('0') << std::setw(2)
+                << (int)device->id;
+            const char* type = device->type == AdamNet::DeviceKeyboard ? "keyboard" :
+                (device->type == AdamNet::DevicePrinter ? "printer" :
+                (device->type == AdamNet::DeviceDisk ? "disk" : "data_pack"));
+            const char* timing = device->timing == AdamNet::TimingKeyboard ? "keyboard" :
+                (device->timing == AdamNet::TimingPrinter ? "printer" :
+                (device->timing == AdamNet::TimingFloppy ? "floppy" : "data_pack"));
+            devices.push_back({
+                {"id", id.str()},
+                {"name", device->name},
+                {"type", type},
+                {"slot", device->slot},
+                {"max_transfer", device->max_transfer},
+                {"timing", timing}
+            });
+        }
+        info["adamnet_devices"] = devices;
+
+        json media = json::array();
+        for (int i = 0; i < GC_ADAM_MEDIA_SLOT_COUNT; i++)
+        {
+            Emu_AdamMediaInfo media_info;
+            emu_get_adam_media_info((GC_AdamMediaSlot)i, &media_info);
+            std::ostringstream crc;
+            crc << std::hex << std::uppercase << std::setfill('0') << std::setw(8)
+                << media_info.base_crc;
+            media.push_back({
+                {"slot", slot_names[i]},
+                {"inserted", media_info.inserted},
+                {"type", media_info.type == GC_ADAM_MEDIA_DATA_PACK ? "data_pack" :
+                    (media_info.type == GC_ADAM_MEDIA_DISK ? "disk" : "none")},
+                {"size", media_info.size},
+                {"write_protected", media_info.write_protected},
+                {"dirty", media_info.dirty},
+                {"state_owned", media_info.state_owned},
+                {"base_crc", crc.str()},
+                {"source_path", media_info.path},
+                {"working_path", media_info.working_path}
+            });
+        }
+        info["media"] = media;
+        return info;
+    }
+
+    Cartridge* cart = m_core->GetCartridge();
+    info["machine"] = "ColecoVision";
     info["file_path"] = cart->GetFilePath();
     info["file_name"] = cart->GetFileName();
     info["file_directory"] = cart->GetFileDirectory();
@@ -574,9 +841,252 @@ json DebugAdapter::GetMediaInfo()
     else
         info["cartridge_type"] = "Unknown";
 
-    info["cartridge_system"] = "ColecoVision";
-
     return info;
+}
+
+json DebugAdapter::GetAdamStatus()
+{
+    if (!m_core || !m_core->IsReady() || (m_core->GetMachine() != GC_MACHINE_ADAM))
+        return {{"error", "ADAM is not running"}};
+
+    GC_AdamDebugState state;
+    if (!m_core->GetAdamDebugState(&state))
+        return {{"error", "Unable to read ADAM state"}};
+
+    json result = {
+        {"machine", "ADAM"},
+        {"boot_mode", state.boot_mode == GC_ADAM_BOOT_CARTRIDGE ? "cartridge" : "computer"},
+        {"content_type", AdamContentTypeName(state.content_type)},
+        {"master_clock_cycles", state.master_clock_cycles},
+        {"mapping_generation", state.mapping_generation},
+        {"mioc", {
+            {"value", state.mioc},
+            {"hex", AdamHex(state.mioc, 2)},
+            {"lower_selector", state.mioc & 0x03},
+            {"upper_selector", (state.mioc >> 2) & 0x03}
+        }},
+        {"control", {
+            {"value", state.control},
+            {"hex", AdamHex(state.control, 2)},
+            {"adamnet_reset", state.adamnet_reset},
+            {"eos_enabled", state.eos_enabled}
+        }}
+    };
+
+    json firmware = json::array();
+    for (int index = 0; index < GC_ADAM_FIRMWARE_COUNT; index++)
+    {
+        const Adam::FirmwareMetadata* metadata =
+            Adam::GetFirmwareMetadata((GC_AdamFirmware)index);
+        const GC_AdamDebugFirmwareState* debug_firmware = &state.firmware[index];
+        firmware.push_back({
+            {"role", metadata->role_name},
+            {"loaded", debug_firmware->loaded},
+            {"size", debug_firmware->size},
+            {"crc32", AdamHex(debug_firmware->crc, 8)},
+            {"known_revision", debug_firmware->known}
+        });
+    }
+    result["firmware"] = firmware;
+
+    json memory_map = json::array();
+    for (int index = 0; index < GC_ADAM_DEBUG_PAGE_COUNT; index++)
+    {
+        const GC_AdamDebugMemoryPage* page = &state.pages[index];
+        json mapped_page = {
+            {"start", AdamHex(page->start, 4)},
+            {"end", AdamHex(page->end, 4)},
+            {"read_source", AdamMemorySourceName(page->read_source)},
+            {"write_destination", page->write_source == Adam::MemorySourceOpenBus ?
+                "none" : AdamMemorySourceName(page->write_source)},
+            {"debug_writable", page->writable}
+        };
+        if (page->read_source != Adam::MemorySourceOpenBus)
+            mapped_page["read_offset"] = AdamHex(page->read_offset, 4);
+        if (page->write_source == Adam::MemorySourceRAM)
+            mapped_page["write_offset"] = AdamHex(page->write_offset, 4);
+        if (page->cartridge_bank >= 0)
+            mapped_page["cartridge_bank"] = page->cartridge_bank;
+        memory_map.push_back(mapped_page);
+    }
+    result["memory_map"] = memory_map;
+    return result;
+}
+
+json DebugAdapter::GetAdamNetStatus()
+{
+    if (!m_core || !m_core->IsReady() || (m_core->GetMachine() != GC_MACHINE_ADAM))
+        return {{"error", "ADAM is not running"}};
+
+    GC_AdamDebugState state;
+    if (!m_core->GetAdamDebugState(&state))
+        return {{"error", "Unable to read ADAM state"}};
+
+    json result = {
+        {"controller_state", AdamControllerStateName(state.controller_state)},
+        {"pcb", {
+            {"address", AdamHex(state.pcb_address, 4)},
+            {"command_status", state.pcb_command_status},
+            {"command_status_hex", AdamHex(state.pcb_command_status, 2)},
+            {"command_status_name", AdamCommandStatusName(state.pcb_command_status)},
+            {"configured_dcb_count", state.configured_dcb_count}
+        }},
+        {"next_scan_index", state.next_scan_index},
+        {"cycles_until_event", state.cycles_until_event}
+    };
+
+    json transfer = {
+        {"active", state.transfer_active}
+    };
+    if (state.transfer_active)
+    {
+        transfer["kind"] = state.transfer_pcb ? "pcb" : "dcb";
+        transfer["command"] = state.transfer_command;
+        transfer["command_hex"] = AdamHex(state.transfer_command, 2);
+        transfer["command_name"] = AdamCommandStatusName(state.transfer_command);
+        transfer["error"] = state.transfer_error;
+        if (state.transfer_pcb)
+        {
+            transfer["target_pcb_address"] = AdamHex(state.transfer_pcb_address, 4);
+            transfer["configured_dcb_count"] = state.transfer_pcb_count;
+        }
+        else
+        {
+            const AdamNet::DeviceMetadata* device =
+                AdamNet::GetDeviceMetadata(state.transfer_device);
+            transfer["dcb"] = state.transfer_dcb;
+            transfer["device_id"] = AdamHex(state.transfer_device, 2);
+            transfer["device_name"] = IsValidPointer(device) ? device->name : "Unknown";
+            transfer["media_slot"] = IsValidPointer(device) ?
+                AdamMediaSlotName(device->slot) : "none";
+            transfer["block"] = state.transfer_block;
+            transfer["dma_buffer"] = AdamHex(state.transfer_buffer, 4);
+            transfer["length"] = state.transfer_length;
+            transfer["captured_media_generation"] = state.transfer_media_generation;
+        }
+    }
+    result["active_transfer"] = transfer;
+
+    json dcbs = json::array();
+    for (int index = 0; index < GC_ADAM_DEBUG_DCB_COUNT; index++)
+    {
+        const GC_AdamDebugDCB* dcb = &state.dcbs[index];
+        const AdamNet::DeviceMetadata* device = AdamNet::GetDeviceMetadata(dcb->device);
+        u8 node_status = AdamNodeStatusValue(dcb->node_status, dcb->device);
+        dcbs.push_back({
+            {"index", index},
+            {"command_status", dcb->command_status},
+            {"command_status_hex", AdamHex(dcb->command_status, 2)},
+            {"command_status_name", AdamCommandStatusName(dcb->command_status)},
+            {"device_id", AdamHex(dcb->device, 2)},
+            {"device_name", IsValidPointer(device) ? device->name : "Unknown"},
+            {"buffer", AdamHex(dcb->buffer, 4)},
+            {"length", dcb->length},
+            {"block", dcb->block},
+            {"retry", dcb->retry},
+            {"max_length", dcb->max_length},
+            {"device_type", dcb->device_type},
+            {"device_type_name", AdamDCBDeviceTypeName(dcb->device_type)},
+            {"node_status", AdamHex(dcb->node_status, 2)},
+            {"node_status_value", node_status},
+            {"node_status_name", AdamNodeStatusName(node_status)}
+        });
+    }
+    result["dcbs"] = dcbs;
+    result["keyboard"] = {
+        {"fifo_count", state.keyboard_fifo_count},
+        {"fifo_capacity", AdamNet::kKeyboardFIFOSize},
+        {"overflow", state.keyboard_overflow},
+        {"lock", state.keyboard_lock},
+        {"modifiers", {
+            {"shift", state.keyboard_shift},
+            {"control", state.keyboard_control},
+            {"home", state.keyboard_home}
+        }},
+        {"repeat_key", AdamKeyName(state.keyboard_repeat_key)},
+        {"repeat_cycles", state.keyboard_repeat_cycles}
+    };
+    return result;
+}
+
+json DebugAdapter::ListAdamMedia()
+{
+    if (!m_core || !m_core->IsReady() || (m_core->GetMachine() != GC_MACHINE_ADAM))
+        return {{"error", "ADAM is not running"}};
+
+    GC_AdamDebugState state;
+    if (!m_core->GetAdamDebugState(&state))
+        return {{"error", "Unable to read ADAM state"}};
+
+    json media = json::array();
+    for (int slot = 0; slot < GC_ADAM_MEDIA_SLOT_COUNT; slot++)
+    {
+        const GC_AdamDebugMediaState* core_media = &state.media[slot];
+        Emu_AdamMediaInfo host_media = {};
+        emu_get_adam_media_info((GC_AdamMediaSlot)slot, &host_media);
+        media.push_back({
+            {"slot", AdamMediaSlotName(slot)},
+            {"inserted", core_media->inserted},
+            {"type", AdamMediaTypeName(core_media->type)},
+            {"capacity", core_media->size},
+            {"block_count", core_media->block_count},
+            {"position", core_media->position},
+            {"generation", core_media->generation},
+            {"cache_valid", core_media->cache_valid},
+            {"cached_block", core_media->cached_block},
+            {"cached_generation", core_media->cached_generation},
+            {"write_protected", core_media->write_protected},
+            {"dirty", core_media->dirty},
+            {"base_crc32", AdamHex(core_media->base_crc, 8)},
+            {"source_path", host_media.path},
+            {"working_path", host_media.working_path},
+            {"state_owned", host_media.state_owned}
+        });
+    }
+
+    return {{"count", GC_ADAM_MEDIA_SLOT_COUNT}, {"media", media}};
+}
+
+json DebugAdapter::GetAdamPrinterOutput()
+{
+    if (!m_core || !m_core->IsReady() || (m_core->GetMachine() != GC_MACHINE_ADAM))
+        return {{"error", "ADAM is not running"}};
+
+    AdamNet* adam_net = m_core->GetAdam()->GetAdamNet();
+    const u8* data = adam_net->GetPrinterData();
+    int size = adam_net->GetPrinterSize();
+    std::string text;
+    std::ostringstream hex;
+    text.reserve((size_t)size);
+    for (int i = 0; i < size; i++)
+    {
+        u8 value = data[i];
+        if (value == '\r')
+        {
+            if ((i + 1 >= size) || (data[i + 1] != '\n'))
+                text.push_back('\n');
+        }
+        else if ((value == '\n') || (value == '\t') || ((value >= 0x20) && (value < 0x7F)))
+            text.push_back((char)value);
+        else
+            text.push_back('.');
+
+        if (i > 0)
+            hex << ' ';
+        hex << std::hex << std::uppercase << std::setfill('0') << std::setw(2) << (int)value;
+    }
+
+    return {{"size", size}, {"capacity", AdamNet::kPrinterSpoolSize},
+        {"text", text}, {"hex", hex.str()}};
+}
+
+json DebugAdapter::ClearAdamPrinterOutput()
+{
+    if (!m_core || !m_core->IsReady() || (m_core->GetMachine() != GC_MACHINE_ADAM))
+        return {{"error", "ADAM is not running"}};
+
+    m_core->GetAdam()->GetAdamNet()->ClearPrinter();
+    return {{"success", true}};
 }
 
 json DebugAdapter::ListRecentMedia()
@@ -1004,7 +1514,7 @@ json DebugAdapter::GetScreenshot()
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -1030,6 +1540,96 @@ json DebugAdapter::GetScreenshot()
     result["mimeType"] = "image/png";
     result["width"] = runtime.screen_width;
     result["height"] = runtime.screen_height;
+
+    return result;
+}
+
+static const char* const k_video_recording_ratios[] = { "screen", "square", "4:3", "16:9", "16:10" };
+static const char* const k_video_recording_qualities[] = { "low", "medium", "high", "lossless", "lossless_compressed" };
+static const int k_video_recording_ratio_count = sizeof(k_video_recording_ratios) / sizeof(k_video_recording_ratios[0]);
+static const int k_video_recording_quality_count = sizeof(k_video_recording_qualities) / sizeof(k_video_recording_qualities[0]);
+
+static int find_video_recording_option(const std::string& value, const char* const* options, int count)
+{
+    for (int i = 0; i < count; i++)
+    {
+        if (value == options[i])
+            return i;
+    }
+    return -1;
+}
+
+json DebugAdapter::StartVideoRecording(const std::string& file_path, int scale, const std::string& aspect_ratio, const std::string& quality)
+{
+    json result;
+
+    if (!m_core || !m_core->IsReady())
+    {
+        result["error"] = "No media loaded";
+        Log("[MCP] StartVideoRecording failed: No media loaded");
+        return result;
+    }
+
+    if (emu_is_video_recording())
+    {
+        result["error"] = "Video recording is already active";
+        return result;
+    }
+
+    int ratio = aspect_ratio.empty() ? config_video.recording_ratio : find_video_recording_option(aspect_ratio, k_video_recording_ratios, k_video_recording_ratio_count);
+    int quality_index = quality.empty() ? config_video.recording_quality : find_video_recording_option(quality, k_video_recording_qualities, k_video_recording_quality_count);
+
+    if ((scale != 0) && ((scale < 1) || (scale > 20)))
+    {
+        result["error"] = "Invalid scale";
+        return result;
+    }
+
+    if ((ratio < 0) || (quality_index < 0))
+    {
+        result["error"] = "Invalid aspect ratio or quality";
+        return result;
+    }
+
+    if (scale != 0)
+        config_video.recording_scale = scale;
+    config_video.recording_ratio = ratio;
+    config_video.recording_quality = quality_index;
+
+    if (!gui_action_start_video_recording(file_path.empty() ? NULL : file_path.c_str()))
+    {
+        result["error"] = "Failed to start video recording";
+        Log("[MCP] StartVideoRecording failed: %s", file_path.c_str());
+        return result;
+    }
+
+    result["success"] = true;
+    result["file_path"] = video_recorder_get_file_path();
+    result["scale"] = config_video.recording_scale;
+    result["aspect_ratio"] = k_video_recording_ratios[config_video.recording_ratio];
+    result["quality"] = k_video_recording_qualities[config_video.recording_quality];
+
+    return result;
+}
+
+json DebugAdapter::StopVideoRecording()
+{
+    json result;
+
+    if (!emu_is_video_recording())
+    {
+        result["error"] = "Video recording is not active";
+        return result;
+    }
+
+    std::string file_path = video_recorder_get_file_path();
+    u32 frames = video_recorder_get_frame_count();
+
+    gui_action_stop_video_recording();
+
+    result["success"] = true;
+    result["file_path"] = file_path;
+    result["frames"] = frames;
 
     return result;
 }
@@ -1066,14 +1666,23 @@ json DebugAdapter::FinishLoadMedia(const std::string& file_path)
 {
     json result;
 
-    if (gui_is_rom_loading() && !gui_finish_loading_rom())
+    if ((gui_is_rom_loading() && !gui_finish_loading_rom()) || !emu_get_last_load_result())
     {
+        if ((emu_get_last_load_machine() == GC_MACHINE_ADAM) &&
+            !emu_are_adam_firmware_paths_valid())
+        {
+            return AdamFirmwareError(true);
+        }
         result["error"] = "Failed to load media file";
+        result["error_code"] = "media_load_failed";
+        result["detected_machine"] = emu_get_last_load_machine() == GC_MACHINE_ADAM ?
+            "ADAM" : (emu_get_last_load_machine() == GC_MACHINE_COLECOVISION ?
+            "ColecoVision" : "Unknown");
         Log("[MCP] LoadMedia failed: %s", file_path.c_str());
         return result;
     }
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "Failed to load media file";
         Log("[MCP] LoadMedia failed: %s", file_path.c_str());
@@ -1082,11 +1691,99 @@ json DebugAdapter::FinishLoadMedia(const std::string& file_path)
 
     result["success"] = true;
     result["file_path"] = file_path;
-    result["rom_name"] = m_core->GetCartridge()->GetFileName();
-    result["is_pal"] = m_core->GetCartridge()->IsPAL();
-    result["softpatch_applied"] = m_core->GetCartridge()->IsSoftpatchApplied();
-    if (m_core->GetCartridge()->IsSoftpatchApplied())
-        result["softpatch_path"] = m_core->GetCartridge()->GetSoftpatchPath();
+    result["content_name"] = emu_get_content_name();
+    result["machine"] = m_core->GetMachine() == GC_MACHINE_ADAM ? "ADAM" : "ColecoVision";
+    result["is_pal"] = m_core->GetMachine() != GC_MACHINE_ADAM &&
+        m_core->GetCartridge()->IsPAL();
+    if (m_core->GetMachine() == GC_MACHINE_COLECOVISION)
+    {
+        result["softpatch_applied"] = m_core->GetCartridge()->IsSoftpatchApplied();
+        if (m_core->GetCartridge()->IsSoftpatchApplied())
+            result["softpatch_path"] = m_core->GetCartridge()->GetSoftpatchPath();
+    }
+
+    return result;
+}
+
+json DebugAdapter::StartAdam()
+{
+    if (gui_is_rom_loading())
+        return {{"error", "Another media load is already in progress"},
+            {"error_code", "load_in_progress"}};
+    if (!emu_are_adam_firmware_paths_valid())
+        return AdamFirmwareError(true);
+    if (!gui_start_adam())
+        return {{"error", "Unable to start ADAM"}, {"error_code", "adam_start_failed"}};
+
+    return {
+        {"success", true},
+        {"machine", "ADAM"},
+        {"boot_mode", "computer"},
+        {"content_name", emu_get_content_name()}
+    };
+}
+
+json DebugAdapter::LoadBios(const std::string& file_path, GC_AdamFirmware firmware)
+{
+    json result;
+
+    if (file_path.empty())
+    {
+        result["error"] = "File path is required";
+        Log("[MCP] LoadBios failed: File path is required");
+        return result;
+    }
+
+    if (gui_is_rom_loading() || emu_is_busy())
+    {
+        result["error"] = "Another media load is already in progress";
+        result["error_code"] = "load_in_progress";
+        return result;
+    }
+
+    const Adam::FirmwareMetadata* metadata = Adam::GetFirmwareMetadata(firmware);
+    size_t actual_size = 0;
+    u32 crc = 0;
+    bool valid = emu_inspect_adam_firmware(firmware, file_path.c_str(), &actual_size, &crc);
+
+    if (actual_size == 0)
+    {
+        result["error"] = "Failed to load BIOS file: file not found or empty";
+        Log("[MCP] LoadBios failed: file not found or empty: %s", file_path.c_str());
+        return result;
+    }
+
+    if (!valid)
+    {
+        result["error"] = std::string("Failed to load BIOS file: invalid ") + metadata->role_name + " size";
+        result["expected_size"] = metadata->size;
+        result["actual_size"] = actual_size;
+        Log("[MCP] LoadBios failed: invalid size: %s", file_path.c_str());
+        return result;
+    }
+
+    if (!gui_adam_apply_firmware_path(firmware, file_path.c_str()))
+    {
+        result["error"] = "Failed to load BIOS file";
+        Log("[MCP] LoadBios failed: %s", file_path.c_str());
+        return result;
+    }
+
+    bool known_revision = crc == metadata->crc;
+
+    result["success"] = true;
+    result["file_path"] = file_path;
+    result["role"] = metadata->role_name;
+    result["size"] = actual_size;
+    result["crc32"] = AdamHex(crc, 8);
+    result["known_revision"] = known_revision;
+
+    if (!emu_is_empty() && (emu_get_machine() == GC_MACHINE_ADAM))
+        result["note"] = "ADAM is running; firmware will be used on next ADAM power-on";
+
+    if (!known_revision)
+        result["warning"] = std::string("CRC does not match the known ") + metadata->role_name + " revision (" +
+            AdamHex(metadata->crc, 8) + ")";
 
     return result;
 }
@@ -1172,7 +1869,7 @@ json DebugAdapter::SaveState()
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         Log("[MCP] SaveState failed: No media loaded");
@@ -1180,11 +1877,16 @@ json DebugAdapter::SaveState()
     }
 
     int slot = config_emulator.save_slot + 1;
-    emu_save_state_slot(slot);
+    if (!emu_save_state_slot(slot))
+    {
+        result["error"] = "Failed to save state slot";
+        Log("[MCP] SaveState failed: Slot %d", slot);
+        return result;
+    }
 
     result["success"] = true;
     result["slot"] = slot;
-    result["rom_name"] = m_core->GetCartridge()->GetFileName();
+    result["content_name"] = emu_get_content_name();
 
     return result;
 }
@@ -1193,7 +1895,7 @@ json DebugAdapter::LoadState()
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         Log("[MCP] LoadState failed: No media loaded");
@@ -1211,7 +1913,12 @@ json DebugAdapter::LoadState()
         return result;
     }
 
-    emu_load_state_slot(slot);
+    if (!emu_load_state_slot(slot))
+    {
+        result["error"] = "Failed to load state slot";
+        Log("[MCP] LoadState failed: Slot %d", slot);
+        return result;
+    }
 
     result["success"] = true;
     result["slot"] = slot;
@@ -1230,14 +1937,14 @@ json DebugAdapter::SaveStateFile(const std::string& file_path)
         return result;
     }
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         Log("[MCP] SaveStateFile failed: No media loaded");
         return result;
     }
 
-    if (!m_core->SaveState(file_path.c_str(), -1, false))
+    if (!m_core->SaveState(file_path.c_str(), -1, m_core->GetMachine() == GC_MACHINE_ADAM))
     {
         result["error"] = "Failed to save state file";
         Log("[MCP] SaveStateFile failed: %s", file_path.c_str());
@@ -1261,7 +1968,7 @@ json DebugAdapter::LoadStateFile(const std::string& file_path)
         return result;
     }
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         Log("[MCP] LoadStateFile failed: No media loaded");
@@ -1275,6 +1982,9 @@ json DebugAdapter::LoadStateFile(const std::string& file_path)
         return result;
     }
 
+    emu_debug_state_restored();
+    emu_reconcile_adam_media_after_state_load();
+    emu_restore_adam_state_screenshot(file_path.c_str());
     events_sync_input();
     rewind_reset();
     runahead_reset();
@@ -1427,6 +2137,207 @@ json DebugAdapter::ControllerButton(int player, const std::string& button, const
     return result;
 }
 
+json DebugAdapter::AdamKeyboard(const std::string& key, const std::string& action)
+{
+    if (!m_core || !m_core->IsReady() || (m_core->GetMachine() != GC_MACHINE_ADAM))
+        return {{"error", "ADAM is not running"}};
+    if ((action != "press") && (action != "release") && (action != "tap"))
+        return {{"error", "Invalid action (must be: press, release, tap)"}};
+
+    std::string key_name = key;
+    std::transform(key_name.begin(), key_name.end(), key_name.begin(), ::tolower);
+    GC_AdamKey adam_key = GC_ADAM_KEY_COUNT;
+    if ((key_name.length() == 1) && (key_name[0] >= 'a') && (key_name[0] <= 'z'))
+        adam_key = (GC_AdamKey)(GC_ADAM_KEY_A + key_name[0] - 'a');
+    else if ((key_name.length() == 1) && (key_name[0] >= '0') && (key_name[0] <= '9'))
+        adam_key = (GC_AdamKey)(GC_ADAM_KEY_0 + key_name[0] - '0');
+    else
+    {
+        static const char* names[] = {
+            "space", "minus", "plus", "caret", "semicolon", "quote", "open_bracket",
+            "close_bracket", "backslash", "comma", "period", "slash", "return",
+            "escape", "backspace", "tab", "home", "smart_1", "smart_2", "smart_3",
+            "smart_4", "smart_5", "smart_6", "wild_card", "undo", "move", "store",
+            "insert", "print", "clear", "delete", "up", "right", "down", "left",
+            "shift", "control", "lock"
+        };
+        for (int i = 0; i < (int)(sizeof(names) / sizeof(names[0])); i++)
+        {
+            if (key_name == names[i])
+            {
+                adam_key = (GC_AdamKey)(GC_ADAM_KEY_SPACE + i);
+                break;
+            }
+        }
+        if (key_name == "enter") adam_key = GC_ADAM_KEY_RETURN;
+        else if (key_name == "esc") adam_key = GC_ADAM_KEY_ESCAPE;
+        else if (key_name == "ctrl") adam_key = GC_ADAM_KEY_CONTROL;
+    }
+
+    if (adam_key == GC_ADAM_KEY_COUNT)
+        return {{"error", "Invalid ADAM key name"}};
+
+    if ((action == "press") || (action == "tap"))
+        emu_adam_key_pressed(adam_key);
+    if ((action == "release") || (action == "tap"))
+        emu_adam_key_released(adam_key);
+    return {{"success", true}, {"key", key_name}, {"action", action}};
+}
+
+static json KeyMapLayer(KeyMap* key_map, GC_KeyMapLayer layer)
+{
+    json entries = json::object();
+
+    for (int usage = 0; usage < GC_HOST_KEY_COUNT; usage++)
+    {
+        const GC_KeyMapEntry& entry = key_map->GetLayerEntry(layer, (u16)usage);
+        const char* name = KeyMap::GetHostKeyName((u16)usage);
+
+        if (entry.set && IsValidPointer(name))
+            entries[name] = KeyMap::FormatTargets(entry);
+    }
+
+    return entries;
+}
+
+json DebugAdapter::GetKeyMap()
+{
+    KeyMap* key_map = m_core->GetKeyMap();
+    bool reached[GC_ADAM_KEY_COUNT] = { };
+    json remapped = json::object();
+
+    for (int usage = 0; usage < GC_HOST_KEY_COUNT; usage++)
+    {
+        GC_KeyMapLayer layer = GC_KEY_MAP_BUILT_IN;
+        const GC_KeyMapEntry& entry = key_map->GetEntry((u16)usage, &layer);
+        const char* name = KeyMap::GetHostKeyName((u16)usage);
+
+        for (int i = 0; i < entry.count; i++)
+            reached[entry.keys[i]] = true;
+
+        if ((layer != GC_KEY_MAP_BUILT_IN) && IsValidPointer(name))
+            remapped[name] = KeyMap::FormatTargets(entry);
+    }
+
+    json unreachable = json::array();
+
+    for (int key = 0; key < GC_ADAM_KEY_COUNT; key++)
+    {
+        const char* name = KeyMap::GetKeyName((GC_AdamKey)key);
+
+        if (IsValidPointer(name) && !reached[key])
+            unreachable.push_back(name);
+    }
+
+    json result;
+    result["enabled"] = key_map->IsEnabled();
+    result["mapper_open"] = m_core->GetKeyMapper()->IsOpen();
+    result["file"] = emu_key_map_get_path();
+    result["user"] = KeyMapLayer(key_map, GC_KEY_MAP_USER);
+    result["remapped"] = remapped;
+    result["unreachable"] = unreachable;
+    return result;
+}
+
+json DebugAdapter::SetKeyBinding(const std::string& host, const std::string& keys)
+{
+    if (!m_core || !m_core->IsReady() || (m_core->GetMachine() != GC_MACHINE_ADAM))
+        return {{"error", "ADAM is not running"}};
+
+    KeyMap* key_map = m_core->GetKeyMap();
+    u16 usage = 0;
+    GC_KeyMapEntry entry;
+    std::string error;
+
+    if (keys == "default")
+    {
+        int found = KeyMap::FindHostKey(host.c_str());
+
+        if (found < 0)
+            return {{"error", "Unknown host key " + host}};
+
+        GC_KeyMapEntry empty;
+        memset(&empty, 0, sizeof(empty));
+        key_map->SetEntry(GC_KEY_MAP_USER, (u16)found, empty);
+        key_map->SetChanged(true);
+        usage = (u16)found;
+    }
+    else
+    {
+        if (!KeyMap::ParseEntry(host, keys, &usage, &entry, &error))
+            return {{"error", error}};
+
+        GC_AdamKey targets[GC_KEY_MAP_TARGETS];
+
+        for (int i = 0; i < entry.count; i++)
+            targets[i] = (GC_AdamKey)entry.keys[i];
+
+        key_map->Bind(usage, targets, entry.count);
+    }
+
+    emu_key_map_save();
+    return {{"success", true}, {"host", KeyMap::GetHostKeyName(usage)},
+        {"keys", KeyMap::FormatTargets(key_map->GetEntry(usage))}, {"file", emu_key_map_get_path()}};
+}
+
+json DebugAdapter::SetKeyMapping(bool enabled)
+{
+    if (m_core->GetKeyMap()->IsEnabled() != enabled)
+        emu_key_mapping_toggle();
+
+    return {{"success", true}, {"enabled", m_core->GetKeyMap()->IsEnabled()}};
+}
+
+json DebugAdapter::HostKey(const std::string& key, const std::string& action)
+{
+    if (!m_core || !m_core->IsReady() || (m_core->GetMachine() != GC_MACHINE_ADAM))
+        return {{"error", "ADAM is not running"}};
+
+    std::string name = key;
+    std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+    int usage = KeyMap::FindHostKey(name.c_str());
+
+    if (usage < 0)
+        return {{"error", "Unknown host key '" + key + "'"}};
+
+    bool delayed_release = false;
+
+    if (action == "press")
+        emu_adam_host_key_pressed(usage);
+    else if (action == "release")
+        emu_adam_host_key_released(usage);
+    else if (action == "press_and_release")
+    {
+        emu_adam_host_key_pressed(usage);
+
+        if (m_core->GetKeyMapper()->IsOpen())
+            emu_adam_host_key_released(usage);
+        else
+            delayed_release = true;
+    }
+    else
+        return {{"error", "Invalid action (must be: press, release, press_and_release)"}};
+
+    json result = {{"success", true}, {"key", KeyMap::GetHostKeyName((u16)usage)}, {"action", action},
+        {"drives", KeyMap::FormatTargets(m_core->GetKeyMap()->GetEntry((u16)usage))}};
+
+    if (delayed_release)
+        result["__delayed_host_release"] = usage;
+
+    return result;
+}
+
+json DebugAdapter::SetKeyMapperOpen(bool open)
+{
+    if (!m_core || !m_core->IsReady() || (m_core->GetMachine() != GC_MACHINE_ADAM))
+        return {{"error", "ADAM is not running"}};
+
+    if (emu_key_mapper_is_open() != open)
+        emu_key_mapper_toggle();
+
+    return {{"success", true}, {"open", emu_key_mapper_is_open()}};
+}
+
 json DebugAdapter::GetInputState()
 {
     static const char* button_names[] = {
@@ -1463,7 +2374,7 @@ json DebugAdapter::ListSprites()
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -1509,7 +2420,7 @@ json DebugAdapter::GetSpriteImage(int sprite_index)
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -1555,7 +2466,7 @@ json DebugAdapter::RunToAddress(u16 address)
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -1573,7 +2484,7 @@ json DebugAdapter::AddDisassemblerBookmark(u16 address, const std::string& name)
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -1592,7 +2503,7 @@ json DebugAdapter::RemoveDisassemblerBookmark(u16 address)
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -1610,7 +2521,7 @@ json DebugAdapter::AddSymbol(u8 bank, u16 address, const std::string& name)
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -1632,7 +2543,7 @@ json DebugAdapter::RemoveSymbol(u8 bank, u16 address)
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -1653,7 +2564,7 @@ json DebugAdapter::SelectMemoryRange(int editor, int start_address, int end_addr
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -1666,7 +2577,7 @@ json DebugAdapter::SelectMemoryRange(int editor, int start_address, int end_addr
     }
 
     MemoryAreaInfo info = GetMemoryAreaInfo(editor);
-    if (!IsValidPointer(info.data) || info.size == 0)
+    if ((!IsValidPointer(info.data) && !info.virtual_area) || info.size == 0)
     {
         result["error"] = "Memory area unavailable";
         return result;
@@ -1721,7 +2632,7 @@ json DebugAdapter::SetMemorySelectionValue(int editor, u8 value)
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -1746,7 +2657,7 @@ json DebugAdapter::AddMemoryBookmark(int editor, int address, const std::string&
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -1774,7 +2685,7 @@ json DebugAdapter::RemoveMemoryBookmark(int editor, int address)
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -1801,7 +2712,7 @@ json DebugAdapter::AddMemoryWatch(int editor, int address, const std::string& no
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -1841,7 +2752,7 @@ json DebugAdapter::RemoveMemoryWatch(int editor, int address)
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -1868,7 +2779,7 @@ json DebugAdapter::ListDisassemblerBookmarks()
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -1906,7 +2817,7 @@ json DebugAdapter::ListSymbols()
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -1947,7 +2858,7 @@ json DebugAdapter::LookupSymbolByName(const std::string& name)
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -1979,7 +2890,7 @@ json DebugAdapter::LookupSymbolAtAddress(u8 bank, u16 address)
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -2004,7 +2915,7 @@ json DebugAdapter::ListCallStack()
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -2053,7 +2964,7 @@ json DebugAdapter::ListMemoryBookmarks(int area)
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -2100,7 +3011,7 @@ json DebugAdapter::ListMemoryWatches(int area)
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -2155,7 +3066,7 @@ json DebugAdapter::GetMemorySelection(int area)
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -2197,7 +3108,7 @@ json DebugAdapter::MemorySearchCapture(int area)
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -2221,7 +3132,7 @@ json DebugAdapter::MemorySearch(int area, const std::string& op, const std::stri
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -2321,7 +3232,7 @@ json DebugAdapter::MemoryFind(int area, const std::string& value, bool text, boo
 {
     json result;
 
-    if (!m_core || !m_core->GetCartridge()->IsReady())
+    if (!m_core || !m_core->IsReady())
     {
         result["error"] = "No media loaded";
         return result;
@@ -2375,6 +3286,12 @@ json DebugAdapter::MemoryFind(int area, const std::string& value, bool text, boo
 json DebugAdapter::GetTraceLog(s64 start, int count)
 {
     json result;
+    const char* stop_reason = gui_debug_trace_logger_get_stop_reason();
+    result["enabled"] = gui_debug_trace_logger_is_enabled();
+
+    if (IsValidPointer(stop_reason))
+        result["stopped_by"] = stop_reason;
+
 
     TraceLogger* tl = m_core->GetTraceLogger();
     if (!tl)
@@ -2456,6 +3373,7 @@ json DebugAdapter::GetTraceLog(s64 start, int count)
 
 json DebugAdapter::SetTraceLog(const json& arguments)
 {
+    static const char* const k_vblank_watch_operations[] = { "read", "write", "read_write" };
     json result;
 
 #if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
@@ -2492,6 +3410,9 @@ json DebugAdapter::SetTraceLog(const json& arguments)
         else if (filter == "vdp.interrupts") { flags |= TRACE_FLAG_VDP; masks[TRACE_VDP] |= TRACE_VDP_EVENT_INTERRUPTS; }
         else if (filter == "vdp.status") { flags |= TRACE_FLAG_VDP; masks[TRACE_VDP] |= TRACE_VDP_EVENT_STATUS; }
         else if (filter == "vdp.sprites") { flags |= TRACE_FLAG_VDP; masks[TRACE_VDP] |= TRACE_VDP_EVENT_SPRITES; }
+        else if (filter == "vdp.sprite_budget") { flags |= TRACE_FLAG_VDP; masks[TRACE_VDP] |= TRACE_VDP_EVENT_SPRITE_BUDGET; }
+        else if (filter == "vdp.sprite_limit") { flags |= TRACE_FLAG_VDP; masks[TRACE_VDP] |= TRACE_VDP_EVENT_SPRITE_LIMIT; }
+        else if (filter == "vdp.missed_vblank") { flags |= TRACE_FLAG_VDP; masks[TRACE_VDP] |= TRACE_VDP_EVENT_MISSED_VBLANK; }
         else if (filter == "vdp.timing") { flags |= TRACE_FLAG_VDP; masks[TRACE_VDP] |= TRACE_VDP_EVENT_TIMING; }
         else if (filter == "vdp.vram") { flags |= TRACE_FLAG_VDP; masks[TRACE_VDP] |= TRACE_VDP_EVENT_VRAM; }
         else if (filter == "psg.tone") { flags |= TRACE_FLAG_PSG; masks[TRACE_PSG] |= TRACE_PSG_EVENT_TONE; }
@@ -2508,6 +3429,10 @@ json DebugAdapter::SetTraceLog(const json& arguments)
         else if (filter == "input.reads") { flags |= TRACE_FLAG_INPUT; masks[TRACE_INPUT] |= TRACE_INPUT_EVENT_READS; }
         else if (filter == "input.writes") { flags |= TRACE_FLAG_INPUT; masks[TRACE_INPUT] |= TRACE_INPUT_EVENT_WRITES; }
         else if (filter == "sgm.control") { flags |= TRACE_FLAG_SGM; masks[TRACE_SGM] |= TRACE_SGM_EVENT_CONTROL; }
+        else if (filter == "adam.map") { flags |= TRACE_FLAG_ADAM; masks[TRACE_ADAM] |= TRACE_ADAM_EVENT_MAP; }
+        else if (filter == "adam.commands") { flags |= TRACE_FLAG_ADAM; masks[TRACE_ADAM] |= TRACE_ADAM_EVENT_COMMANDS; }
+        else if (filter == "adam.dma") { flags |= TRACE_FLAG_ADAM; masks[TRACE_ADAM] |= TRACE_ADAM_EVENT_DMA; }
+        else if (filter == "adam.errors") { flags |= TRACE_FLAG_ADAM; masks[TRACE_ADAM] |= TRACE_ADAM_EVENT_ERRORS; }
         else if (filter == "mapper.banks") { flags |= TRACE_FLAG_MAPPER; masks[TRACE_MAPPER] |= TRACE_MAPPER_EVENT_BANKS; }
         else if (filter == "mapper.eeprom") { flags |= TRACE_FLAG_MAPPER; masks[TRACE_MAPPER] |= TRACE_MAPPER_EVENT_EEPROM; }
         else if (filter == "mapper.sram") { flags |= TRACE_FLAG_MAPPER; masks[TRACE_MAPPER] |= TRACE_MAPPER_EVENT_SRAM; }
@@ -2527,6 +3452,30 @@ json DebugAdapter::SetTraceLog(const json& arguments)
         return {{"error", "Unknown trace memory size"}};
     if (disk_index < 0)
         return {{"error", "Unknown trace disk size"}};
+    int vblank_watch_address_value = config_debug.trace_vblank_watch_address;
+    std::string vblank_watch_address = arguments.value("vblank_watch_address", "");
+    if (!vblank_watch_address.empty())
+    {
+        u16 address = 0;
+        if (!parse_hex_with_prefix(vblank_watch_address, &address))
+            return {{"error", "Invalid vblank watch address"}};
+        vblank_watch_address_value = address;
+    }
+
+    int vblank_watch_operation_value = config_debug.trace_vblank_watch_operation;
+    std::string vblank_watch_operation = arguments.value("vblank_watch_operation", "");
+    if (!vblank_watch_operation.empty())
+    {
+        vblank_watch_operation_value = -1;
+        for (int i = 0; i < 3; i++)
+        {
+            if (vblank_watch_operation == k_vblank_watch_operations[i])
+                vblank_watch_operation_value = i;
+        }
+        if (vblank_watch_operation_value < 0)
+            return {{"error", "Invalid vblank watch operation"}};
+    }
+
     bool custom_path = arguments.contains("output_path") && !arguments["output_path"].get<std::string>().empty();
     std::string requested_path = custom_path ? arguments["output_path"].get<std::string>() : std::string();
     bool storage_change = output != config_debug.trace_output;
@@ -2551,6 +3500,8 @@ json DebugAdapter::SetTraceLog(const json& arguments)
             return {{"error", "Unable to configure trace logger"}};
     }
     gui_debug_trace_logger_set_event_filters(masks);
+    config_debug.trace_vblank_watch_address = vblank_watch_address_value;
+    config_debug.trace_vblank_watch_operation = vblank_watch_operation_value;
     if (!gui_debug_trace_logger_start(flags))
         return {{"error", "Unable to start trace logger"}};
     json active_filters = json::array();
@@ -2560,6 +3511,9 @@ json DebugAdapter::SetTraceLog(const json& arguments)
     if (masks[TRACE_VDP] & TRACE_VDP_EVENT_INTERRUPTS) active_filters.push_back("vdp.interrupts");
     if (masks[TRACE_VDP] & TRACE_VDP_EVENT_STATUS) active_filters.push_back("vdp.status");
     if (masks[TRACE_VDP] & TRACE_VDP_EVENT_SPRITES) active_filters.push_back("vdp.sprites");
+    if (masks[TRACE_VDP] & TRACE_VDP_EVENT_SPRITE_BUDGET) active_filters.push_back("vdp.sprite_budget");
+    if (masks[TRACE_VDP] & TRACE_VDP_EVENT_SPRITE_LIMIT) active_filters.push_back("vdp.sprite_limit");
+    if (masks[TRACE_VDP] & TRACE_VDP_EVENT_MISSED_VBLANK) active_filters.push_back("vdp.missed_vblank");
     if (masks[TRACE_VDP] & TRACE_VDP_EVENT_TIMING) active_filters.push_back("vdp.timing");
     if (masks[TRACE_VDP] & TRACE_VDP_EVENT_VRAM) active_filters.push_back("vdp.vram");
     if (masks[TRACE_PSG] & TRACE_PSG_EVENT_TONE) active_filters.push_back("psg.tone");
@@ -2576,6 +3530,10 @@ json DebugAdapter::SetTraceLog(const json& arguments)
     if (masks[TRACE_INPUT] & TRACE_INPUT_EVENT_READS) active_filters.push_back("input.reads");
     if (masks[TRACE_INPUT] & TRACE_INPUT_EVENT_WRITES) active_filters.push_back("input.writes");
     if (masks[TRACE_SGM] & TRACE_SGM_EVENT_CONTROL) active_filters.push_back("sgm.control");
+    if (masks[TRACE_ADAM] & TRACE_ADAM_EVENT_MAP) active_filters.push_back("adam.map");
+    if (masks[TRACE_ADAM] & TRACE_ADAM_EVENT_COMMANDS) active_filters.push_back("adam.commands");
+    if (masks[TRACE_ADAM] & TRACE_ADAM_EVENT_DMA) active_filters.push_back("adam.dma");
+    if (masks[TRACE_ADAM] & TRACE_ADAM_EVENT_ERRORS) active_filters.push_back("adam.errors");
     if (masks[TRACE_MAPPER] & TRACE_MAPPER_EVENT_BANKS) active_filters.push_back("mapper.banks");
     if (masks[TRACE_MAPPER] & TRACE_MAPPER_EVENT_EEPROM) active_filters.push_back("mapper.eeprom");
     if (masks[TRACE_MAPPER] & TRACE_MAPPER_EVENT_SRAM) active_filters.push_back("mapper.sram");
@@ -2583,12 +3541,222 @@ json DebugAdapter::SetTraceLog(const json& arguments)
         {"memory_size", gui_debug_trace_logger_memory_size_name(capacity_index)},
         {"disk_size", gui_debug_trace_logger_disk_size_name(disk_index)},
         {"filters", active_filters}, {"total_entries", tl->GetCount()}};
+    if (masks[TRACE_VDP] & TRACE_VDP_EVENT_MISSED_VBLANK)
+    {
+        char address[8];
+        snprintf(address, sizeof(address), "%04X", config_debug.trace_vblank_watch_address);
+        result["vblank_watch_address"] = address;
+        result["vblank_watch_operation"] = k_vblank_watch_operations[config_debug.trace_vblank_watch_operation];
+    }
     if (output == gui_TraceOutput_Disk)
         result["output_path"] = gui_debug_trace_logger_get_output_path();
 #else
     UNUSED(arguments);
     result["error"] = "Trace logging not available in this build";
 #endif
+
+    return result;
+}
+
+struct ProfilerEntry
+{
+    u32 index;
+    u64 key;
+    std::string name;
+    const char* symbol;
+};
+
+static const char* const k_profiler_type_names[] = { "root", "halt", "call", "irq" };
+
+static bool profiler_entry_compare(const ProfilerEntry& a, const ProfilerEntry& b)
+{
+    if (a.key != b.key)
+        return a.key > b.key;
+    return a.index < b.index;
+}
+
+static double profiler_round(double value)
+{
+    return floor((value * 100.0) + 0.5) / 100.0;
+}
+
+json DebugAdapter::SetProfiler(const std::string& action)
+{
+    json result;
+
+    Profiler* profiler = m_core->GetProfiler();
+    if (!IsValidPointer(profiler))
+    {
+        result["error"] = "Profiler not available";
+        return result;
+    }
+
+    if (action == "start")
+    {
+        if (!config_debug.debug)
+        {
+            config_debug.debug = true;
+            emu_debug_continue();
+        }
+        gui_debug_profiler_show(true);
+    }
+    else if (action == "stop")
+        gui_debug_profiler_show(false);
+    else if (action == "reset")
+    {
+        profiler->Reset();
+        gui_debug_profiler_reset();
+    }
+    else
+    {
+        result["error"] = "Invalid profiler action";
+        return result;
+    }
+
+    result["success"] = true;
+    result["action"] = action;
+    result["window_open"] = config_debug.show_profiler;
+    return result;
+}
+
+json DebugAdapter::GetProfilerData(const std::string& sort, int count, const std::string& filter)
+{
+    json result;
+
+    Profiler* profiler = m_core->GetProfiler();
+    if (!IsValidPointer(profiler) || !IsValidPointer(profiler->GetFunctions()))
+    {
+        result["error"] = "Profiler not available";
+        return result;
+    }
+
+    if (count < 1)
+        count = 50;
+    if (count > 1000)
+        count = 1000;
+
+    profiler->Sync();
+
+    const GC_Profiler_Function* functions = profiler->GetFunctions();
+    u32 function_count = profiler->GetFunctionCount();
+    u64 total = profiler->GetTotalCycles();
+    u32 frame_cycles = gui_debug_profiler_get_frame_cycles();
+    double frames = (frame_cycles > 0) ? (double)total / (double)frame_cycles : 0.0;
+
+    std::string filter_upper = filter;
+    std::transform(filter_upper.begin(), filter_upper.end(), filter_upper.begin(), ::toupper);
+
+    std::vector<ProfilerEntry> entries;
+
+    for (u32 i = 0; i < function_count; i++)
+    {
+        const GC_Profiler_Function& function = functions[i];
+        bool pseudo = (function.type == PROFILER_FUNCTION_ROOT) || (function.type == PROFILER_FUNCTION_HALT);
+
+        ProfilerEntry entry;
+        entry.index = i;
+        entry.key = 0;
+        entry.symbol = "none";
+
+        if (function.type == PROFILER_FUNCTION_ROOT)
+            entry.name = "[Root]";
+        else if (function.type == PROFILER_FUNCTION_HALT)
+            entry.name = "[HALT]";
+        else
+        {
+            bool is_manual = false;
+            bool is_prebuilt = false;
+            const char* name = gui_debug_get_symbol_name(function.bank, function.address, &is_manual, &is_prebuilt);
+            if (IsValidPointer(name))
+            {
+                entry.name = name;
+                entry.symbol = is_manual ? "manual" : (is_prebuilt ? "prebuilt" : "auto");
+            }
+        }
+
+        if (!filter_upper.empty())
+        {
+            std::string name_upper = entry.name;
+            std::transform(name_upper.begin(), name_upper.end(), name_upper.begin(), ::toupper);
+
+            char address[8];
+            snprintf(address, sizeof(address), "%04X", function.address);
+
+            bool name_match = (name_upper.find(filter_upper) != std::string::npos);
+            bool address_match = !pseudo && (std::string(address).find(filter_upper) != std::string::npos);
+
+            if (!name_match && !address_match)
+                continue;
+        }
+
+        if (sort == "exclusive")
+            entry.key = function.exclusive_cycles;
+        else if (sort == "calls")
+            entry.key = function.calls;
+        else if (sort == "average")
+            entry.key = (function.completed > 0) ? function.inclusive_cycles / function.completed : 0;
+        else if (sort == "max")
+            entry.key = (function.completed > 0) ? function.max_cycles : 0;
+        else
+            entry.key = function.inclusive_cycles;
+
+        entries.push_back(entry);
+    }
+
+    std::sort(entries.begin(), entries.end(), profiler_entry_compare);
+
+    json functions_array = json::array();
+
+    for (size_t i = 0; (i < entries.size()) && (i < (size_t)count); i++)
+    {
+        const GC_Profiler_Function& function = functions[entries[i].index];
+        bool root = (function.type == PROFILER_FUNCTION_ROOT);
+        bool pseudo = root || (function.type == PROFILER_FUNCTION_HALT);
+        json item;
+        char text[16];
+
+        item["name"] = entries[i].name;
+        item["type"] = k_profiler_type_names[function.type];
+
+        if (!pseudo)
+        {
+            item["symbol"] = entries[i].symbol;
+            snprintf(text, sizeof(text), "%02X", function.bank);
+            item["bank"] = text;
+            snprintf(text, sizeof(text), "%04X", function.address);
+            item["address"] = text;
+        }
+
+        if (!root)
+        {
+            item["calls"] = function.calls;
+            item["calls_per_frame"] = (frames > 0.0) ? profiler_round((double)function.calls / frames) : 0.0;
+            item["inclusive_cycles"] = function.inclusive_cycles;
+            item["inclusive_percent"] = (total > 0) ? profiler_round(((double)function.inclusive_cycles * 100.0) / (double)total) : 0.0;
+        }
+
+        item["exclusive_cycles"] = function.exclusive_cycles;
+        item["exclusive_percent"] = (total > 0) ? profiler_round(((double)function.exclusive_cycles * 100.0) / (double)total) : 0.0;
+
+        if (!root && (function.completed > 0))
+        {
+            item["average_cycles"] = function.inclusive_cycles / function.completed;
+            item["min_cycles"] = function.min_cycles;
+            item["max_cycles"] = function.max_cycles;
+        }
+
+        functions_array.push_back(item);
+    }
+
+    result["collecting"] = profiler->IsEnabled();
+    result["window_open"] = config_debug.show_profiler;
+    result["total_cycles"] = total;
+    result["frame_cycles"] = frame_cycles;
+    result["frames"] = profiler_round(frames);
+    result["function_count"] = function_count - 2;
+    result["sort"] = sort;
+    result["count"] = functions_array.size();
+    result["functions"] = functions_array;
 
     return result;
 }

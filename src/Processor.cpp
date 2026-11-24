@@ -22,6 +22,7 @@
 #include "Processor.h"
 #include "Memory.h"
 #include "TraceLogger.h"
+#include "Profiler.h"
 #include "common.h"
 #include "opcode_timing.h"
 #include "opcode_names.h"
@@ -33,6 +34,7 @@ Processor::Processor(Memory* pMemory)
     m_pMemory->SetProcessor(this);
     InitPointer(m_pIOPorts);
     InitPointer(m_pTraceLogger);
+    InitPointer(m_pProfiler);
     InitOPCodeTable();
     m_bIFF1 = false;
     m_bIFF2 = false;
@@ -52,6 +54,11 @@ Processor::Processor(Memory* pMemory)
     m_bInputLastCycle = false;
     m_breakpoints_enabled = false;
     m_breakpoints_irq_enabled = false;
+    m_vblank_watch_read = false;
+    m_vblank_watch_write = false;
+    m_vblank_watch_address = 0;
+    ResetVBlankWatch();
+    RefreshMemoryHooks();
     m_cpu_breakpoint_hit = false;
     m_memory_breakpoint_hit = false;
     m_run_to_breakpoint_hit = false;
@@ -94,17 +101,12 @@ void Processor::SetDisassemblerSyntax(GC_Disassembler_Syntax syntax)
     m_disassembler_syntax = syntax;
 }
 
-GC_Disassembler_Syntax Processor::GetDisassemblerSyntax() const
-{
-    return m_disassembler_syntax;
-}
-
 void Processor::Init()
 {
     Reset();
 }
 
-void Processor::Reset()
+void Processor::Reset(bool cold)
 {
     m_bIFF1 = false;
     m_bIFF2 = false;
@@ -115,17 +117,22 @@ void Processor::Reset()
     m_bAfterEI = false;
     m_iInterruptMode = 0;
     PC.SetValue(0x0000);
-    SP.SetValue(0xDFF0);
-    IX.SetValue(0xFFFF);
-    IY.SetValue(0xFFFF);
-    AF.SetValue(0x0040);  // Zero flag set
-    BC.SetValue(0x0000);
-    DE.SetValue(0x0000);
-    HL.SetValue(0x0000);
-    AF2.SetValue(0x0000);
-    BC2.SetValue(0x0000);
-    DE2.SetValue(0x0000);
-    HL2.SetValue(0x0000);
+
+    if (cold)
+    {
+        SP.SetValue(0xDFF0);
+        IX.SetValue(0xFFFF);
+        IY.SetValue(0xFFFF);
+        AF.SetValue(0x0040);  // Zero flag set
+        BC.SetValue(0x0000);
+        DE.SetValue(0x0000);
+        HL.SetValue(0x0000);
+        AF2.SetValue(0x0000);
+        BC2.SetValue(0x0000);
+        DE2.SetValue(0x0000);
+        HL2.SetValue(0x0000);
+    }
+
     WZ.SetValue(0x0000);
     I = 0x00;
     R = 0x00;
@@ -139,6 +146,8 @@ void Processor::Reset()
     m_bInputLastCycle = false;
     m_breakpoints_enabled = false;
     m_breakpoints_irq_enabled = false;
+    ResetVBlankWatch();
+    RefreshMemoryHooks();
     m_cpu_breakpoint_hit = false;
     m_memory_breakpoint_hit = false;
     m_run_to_breakpoint_hit = false;
@@ -150,11 +159,6 @@ void Processor::Reset()
 void Processor::SetIOPOrts(IOPorts* pIOPorts)
 {
     m_pIOPorts = pIOPorts;
-}
-
-IOPorts* Processor::GetIOPOrts()
-{
-    return m_pIOPorts;
 }
 
 unsigned int Processor::RunFor(unsigned int tstates)
@@ -187,7 +191,7 @@ unsigned int Processor::RunFor(unsigned int tstates)
                 WZ.SetValue(PC.GetValue());
 #if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
                 m_debug_next_irq = 2;
-                PushCallStack(pc, 0x0066, pc, 0);
+                PushCallStack(pc, 0x0066, pc, 0, 0, true);
                 TraceIRQEvent(pc, 0x0066, 2);
 #endif
                 DisassembleNextOPCode();
@@ -222,7 +226,7 @@ unsigned int Processor::RunFor(unsigned int tstates)
                 WZ.SetValue(PC.GetValue());
 #if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
                 m_debug_next_irq = 3;
-                PushCallStack(pc, interrupt_vector, pc, m_pMemory->GetBank(interrupt_vector));
+                PushCallStack(pc, interrupt_vector, pc, m_pMemory->GetBank(interrupt_vector), 0, true);
                 TraceIRQEvent(pc, interrupt_vector, 3);
 #endif
                 DisassembleNextOPCode();
@@ -289,9 +293,6 @@ void Processor::LogInstructionEvent(u16 pc)
     e.cpu.i = I;
     e.cpu.r = R;
     e.cpu.im = (u8)m_iInterruptMode;
-    e.cpu.iff1 = m_bIFF1;
-    e.cpu.iff2 = m_bIFF2;
-    e.cpu.halt = m_bHalt;
     e.cpu.size = IsValidPointer(record) ? (u8)std::min(record->size, (int)sizeof(e.cpu.opcodes)) : 1;
 
     for (u8 i = 0; i < sizeof(e.cpu.opcodes); i++)
@@ -563,7 +564,6 @@ void Processor::PopulateDisassemblerRecord(GC_Disassembler_Record* record, u16 a
 {
 #ifndef GEARCOLECO_DISABLE_DISASSEMBLER
 
-    record->address = m_pMemory->GetPhysicalAddress(address);
     record->bank = m_pMemory->GetBank(address);
     record->name[0] = 0;
     record->bytes[0] = 0;
@@ -972,14 +972,17 @@ bool Processor::Halted()
     return m_bHalt;
 }
 
-bool Processor::DuringInputOpcode()
+void Processor::ResetDebuggerExecutionState()
 {
-    return m_bInputLastCycle;
-}
+    ClearDisassemblerCallStack();
+    m_run_to_breakpoint_requested = false;
+    m_cpu_breakpoint_hit = false;
+    m_memory_breakpoint_hit = false;
+    m_run_to_breakpoint_hit = false;
+    m_debug_next_irq = 0;
 
-void Processor::RequestMemoryBreakpoint()
-{
-    m_memory_breakpoint_hit = true;
+    if (IsValidPointer(m_pProfiler))
+        m_pProfiler->ResetStack();
 }
 
 void Processor::SaveState(std::ostream& stream)
@@ -1100,6 +1103,8 @@ void Processor::LoadState(std::istream& stream, int version)
         m_Q = 0;
         m_QTemp = 0;
     }
+
+    ResetVBlankWatch();
 }
 
 Processor::ProcessorState* Processor::GetState()
@@ -1165,11 +1170,51 @@ void Processor::EnableBreakpoints(bool enable, bool irqs)
 {
     m_breakpoints_enabled = enable;
     m_breakpoints_irq_enabled = irqs;
+    RefreshMemoryHooks();
 }
 
 void Processor::ResetBreakpoints()
 {
     m_breakpoints.clear();
+}
+
+void Processor::SetVBlankWatch(bool read, bool write, u16 address)
+{
+    if ((m_vblank_watch_read == read) && (m_vblank_watch_write == write) &&
+        (m_vblank_watch_address == address))
+        return;
+
+    m_vblank_watch_read = read;
+    m_vblank_watch_write = write;
+    m_vblank_watch_address = address;
+    ResetVBlankWatch();
+    RefreshMemoryHooks();
+}
+
+u32 Processor::UpdateVBlankWatch()
+{
+    if (!m_vblank_watch_read && !m_vblank_watch_write)
+        return 0;
+
+    bool missed = m_vblank_watch_armed && !m_vblank_watch_hit;
+    m_vblank_watch_armed = true;
+    m_vblank_watch_hit = false;
+    m_vblank_watch_misses = missed ? m_vblank_watch_misses + 1 : 0;
+
+    return m_vblank_watch_misses;
+}
+
+void Processor::RefreshMemoryHooks()
+{
+    m_memory_hooks_read = m_vblank_watch_read || m_breakpoints_enabled;
+    m_memory_hooks_write = m_vblank_watch_write || m_breakpoints_enabled;
+}
+
+void Processor::ResetVBlankWatch()
+{
+    m_vblank_watch_hit = false;
+    m_vblank_watch_armed = false;
+    m_vblank_watch_misses = 0;
 }
 
 bool Processor::AddBreakpoint(int type, char* text, bool read, bool write, bool execute)
@@ -1316,6 +1361,23 @@ void Processor::SetTraceLogger(TraceLogger* pTraceLogger)
     m_pTraceLogger = pTraceLogger;
 }
 
+void Processor::SetProfiler(Profiler* pProfiler)
+{
+    m_pProfiler = pProfiler;
+}
+
+void Processor::ProfilerEnter(u16 address, u32 pending_cycles, bool irq)
+{
+#if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
+    u32 key = (address >= 0x8000) ? m_pMemory->GetPhysicalAddress(address) : (PROFILER_RAM_KEY | address);
+    m_pProfiler->Enter(key, address, m_pMemory->GetBank(address), SP.GetValue(), irq, pending_cycles);
+#else
+    UNUSED(address);
+    UNUSED(pending_cycles);
+    UNUSED(irq);
+#endif
+}
+
 void Processor::CheckMemoryBreakpoints(int type, u16 address, bool read)
 {
 #ifndef GEARCOLECO_DISABLE_DISASSEMBLER
@@ -1363,7 +1425,7 @@ void Processor::CheckMemoryBreakpoints(int type, u16 address, bool read)
 #endif
 }
 
-void Processor::PushCallStack(u16 src, u16 dest, u16 back, u8 bank)
+void Processor::PushCallStack(u16 src, u16 dest, u16 back, u8 bank, u8 tstates, bool irq)
 {
 #if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
     GC_CallStackEntry entry;
@@ -1373,19 +1435,29 @@ void Processor::PushCallStack(u16 src, u16 dest, u16 back, u8 bank)
     entry.bank = bank;
     if (m_disassembler_call_stack.size() < 256)
         m_disassembler_call_stack.push(entry);
+
+    if (unlikely(m_pProfiler->IsEnabled()))
+        ProfilerEnter(dest, m_iTStates + tstates, irq);
 #else
     UNUSED(src);
     UNUSED(dest);
     UNUSED(back);
     UNUSED(bank);
+    UNUSED(tstates);
+    UNUSED(irq);
 #endif
 }
 
-void Processor::PopCallStack()
+void Processor::PopCallStack(u8 tstates)
 {
 #if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
     if (!m_disassembler_call_stack.empty())
         m_disassembler_call_stack.pop();
+
+    if (unlikely(m_pProfiler->IsEnabled()))
+        m_pProfiler->Return((u16)(SP.GetValue() - 2), m_iTStates + tstates);
+#else
+    UNUSED(tstates);
 #endif
 }
 

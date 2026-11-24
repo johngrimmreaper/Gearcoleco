@@ -17,9 +17,9 @@
  *
  */
 
-#include <iomanip>
 #include <string>
 #include <string.h>
+#include <math.h>
 #include "GearcolecoCore.h"
 #include "Memory.h"
 #include "Processor.h"
@@ -28,10 +28,15 @@
 #include "TMS9918A.h"
 #include "F18A.h"
 #include "Input.h"
+#include "KeyMap.h"
+#include "KeyMapper.h"
+#include "HostKeys.h"
 #include "Cartridge.h"
 #include "ColecoVisionIOPorts.h"
+#include "Adam.h"
 #if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
 #include "TraceLogger.h"
+#include "Profiler.h"
 #endif
 #include "no_bios.h"
 #include "common.h"
@@ -51,19 +56,35 @@ GearcolecoCore::GearcolecoCore()
     InitPointer(m_pColecoVisionIOPorts);
     InitPointer(m_pRandom);
     InitPointer(m_pTraceLogger);
+    InitPointer(m_pProfiler);
+    InitPointer(m_pAdam);
+    InitPointer(m_pKeyMap);
+    InitPointer(m_pKeyMapper);
+    InitPointer(m_pStateBackup);
+    m_StateBackupCapacity = 0;
     InitPointer(m_pFrameBuffer);
     m_bPaused = true;
+    m_bHostHotkeys = false;
     m_pixelFormat = GC_PIXEL_RGBA8888;
     m_MasterClockCycles = 0;
     m_requested_video_chip = GC_VIDEO_CHIP_AUTO;
     m_video_chip = GC_VIDEO_CHIP_TMS9918A;
+    m_machine = GC_MACHINE_COLECOVISION;
+    m_content_type = GC_CONTENT_NONE;
+    m_adam_boot_mode = GC_ADAM_BOOT_COMPUTER;
+    m_adam_region = Cartridge::CartridgeUnknownRegion;
 }
 
 GearcolecoCore::~GearcolecoCore()
 {
+    SafeDeleteArray(m_pStateBackup);
+    SafeDelete(m_pAdam);
+    SafeDelete(m_pKeyMapper);
+    SafeDelete(m_pKeyMap);
     SafeDelete(m_pColecoVisionIOPorts);
 #if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
     SafeDelete(m_pTraceLogger);
+    SafeDelete(m_pProfiler);
 #endif
     SafeDelete(m_pCartridge);
     SafeDelete(m_pInput);
@@ -87,11 +108,17 @@ void GearcolecoCore::Init(GC_Color_Format pixelFormat)
     m_pMemory = new Memory(m_pCartridge, m_pRandom);
     m_pProcessor = new Processor(m_pMemory);
     m_pAudio = new Audio();
-    m_pTMS9918A = new TMS9918A(m_pMemory, m_pProcessor);
-    m_pF18A = new F18A(m_pMemory, m_pProcessor);
+    m_pTMS9918A = new TMS9918A(m_pProcessor);
+    m_pF18A = new F18A(m_pProcessor);
     m_pVideo = m_pTMS9918A;
     m_pInput = new Input(m_pProcessor);
-    m_pColecoVisionIOPorts = new ColecoVisionIOPorts(m_pAudio, m_pVideo, m_pInput, m_pCartridge, m_pMemory, m_pProcessor);
+    m_pColecoVisionIOPorts = new ColecoVisionIOPorts(m_pAudio, m_pVideo, m_pInput, m_pMemory, m_pProcessor);
+    m_pAdam = new Adam();
+    m_pAdam->Init(m_pColecoVisionIOPorts);
+    m_pKeyMap = new KeyMap();
+    m_pKeyMap->Init(&GearcolecoCore::KeyMapCallback, this);
+    m_pKeyMapper = new KeyMapper();
+    m_pKeyMapper->Init(m_pKeyMap, m_pixelFormat);
 
     m_pMemory->Init();
     m_pProcessor->Init();
@@ -111,13 +138,15 @@ void GearcolecoCore::Init(GC_Color_Format pixelFormat)
     m_pF18A->SetTraceLogger(m_pTraceLogger);
     m_pInput->SetTraceLogger(m_pTraceLogger);
     m_pColecoVisionIOPorts->SetTraceLogger(m_pTraceLogger);
+    m_pAdam->SetTraceLogger(m_pTraceLogger);
+    m_pProfiler = new Profiler(&m_MasterClockCycles);
+    m_pProcessor->SetProfiler(m_pProfiler);
 #endif
 }
 
 void GearcolecoCore::SetVideoChip(GC_VideoChip video_chip)
 {
-    if ((video_chip == GC_VIDEO_CHIP_AUTO) || (video_chip == GC_VIDEO_CHIP_TMS9918A) ||
-        (video_chip == GC_VIDEO_CHIP_F18A))
+    if ((video_chip == GC_VIDEO_CHIP_AUTO) || (video_chip == GC_VIDEO_CHIP_TMS9918A) || (video_chip == GC_VIDEO_CHIP_F18A))
     {
         m_requested_video_chip = video_chip;
     }
@@ -162,18 +191,33 @@ bool GearcolecoCore::RunToVBlank(u8* pFrameBuffer, s16* pSampleBuffer, int* pSam
 {
     m_pFrameBuffer = pFrameBuffer;
 
-    if (!m_pMemory->IsBiosLoaded())
+    if (m_pKeyMapper->IsOpen() && ((m_machine != GC_MACHINE_ADAM) || !IsReady()))
+        m_pKeyMapper->Close();
+
+    if (m_pKeyMapper->IsOpen())
+    {
+        if (IsValidPointer(pSampleCount))
+            *pSampleCount = 0;
+
+        if (render)
+            m_pKeyMapper->Render(pFrameBuffer);
+
+        return false;
+    }
+
+    if (!IsReady())
     {
         if (render)
             RenderFrameBuffer(pFrameBuffer);
         return false;
     }
 
-    if (!m_bPaused && m_pCartridge->IsReady())
+    if (!m_bPaused && IsReady())
     {
 #if !defined(GEARCOLECO_DISABLE_DISASSEMBLER)
         bool debug_enable = false;
         bool instruction_completed = false;
+
         if (IsValidPointer(debug))
         {
             debug_enable = true;
@@ -191,6 +235,8 @@ bool GearcolecoCore::RunToVBlank(u8* pFrameBuffer, s16* pSampleBuffer, int* pSam
             vblank = m_pVideo->Tick(clockCycles);
             m_pAudio->Tick(clockCycles);
             m_pMemory->Tick(clockCycles);
+            if (unlikely(m_machine == GC_MACHINE_ADAM))
+                m_pAdam->Clock(clockCycles);
             totalClocks += clockCycles;
 
             if (debug_enable)
@@ -217,6 +263,7 @@ bool GearcolecoCore::RunToVBlank(u8* pFrameBuffer, s16* pSampleBuffer, int* pSam
         while (!vblank);
 
         m_pAudio->EndFrame(pSampleBuffer, pSampleCount);
+
         if (render)
             RenderFrameBuffer(pFrameBuffer);
 
@@ -237,6 +284,8 @@ bool GearcolecoCore::RunToVBlank(u8* pFrameBuffer, s16* pSampleBuffer, int* pSam
             vblank = m_pVideo->Tick(clockCycles);
             m_pAudio->Tick(clockCycles);
             m_pMemory->Tick(clockCycles);
+            if (unlikely(m_machine == GC_MACHINE_ADAM))
+                m_pAdam->Clock(clockCycles);
             totalClocks += clockCycles;
 
             if (totalClocks > 702240)
@@ -245,6 +294,7 @@ bool GearcolecoCore::RunToVBlank(u8* pFrameBuffer, s16* pSampleBuffer, int* pSam
         while (!vblank);
 
         m_pAudio->EndFrame(pSampleBuffer, pSampleCount);
+
         if (render)
             RenderFrameBuffer(pFrameBuffer);
 
@@ -257,11 +307,29 @@ bool GearcolecoCore::RunToVBlank(u8* pFrameBuffer, s16* pSampleBuffer, int* pSam
 
 bool GearcolecoCore::LoadROM(const char* szFilePath, Cartridge::ForceConfiguration* config, bool softpatching)
 {
-    if (m_pCartridge->LoadFromFile(szFilePath, softpatching))
+    Cartridge pending;
+    Cartridge* cartridge = m_pCartridge;
+
+    if (m_machine == GC_MACHINE_ADAM)
     {
+        pending.Init();
+        cartridge = &pending;
+    }
+
+    if (cartridge->LoadFromFile(szFilePath, softpatching))
+    {
+        if (cartridge == &pending)
+            m_pCartridge->Swap(pending);
+
         if (IsValidPointer(config))
             m_pCartridge->ForceConfig(*config);
 
+        m_machine = GC_MACHINE_COLECOVISION;
+        m_content_type = GC_CONTENT_CARTRIDGE;
+        m_adam_boot_mode = GC_ADAM_BOOT_COMPUTER;
+        EjectAllAdamMedia();
+        m_pAdam->SetEnabled(false);
+        m_pMemory->SetAdam(NULL);
         SelectVideoChipForCartridge();
         Reset();
 
@@ -274,95 +342,414 @@ bool GearcolecoCore::LoadROM(const char* szFilePath, Cartridge::ForceConfigurati
         return false;
 }
 
-bool GearcolecoCore::LoadROMFromBuffer(const u8* buffer, int size, Cartridge::ForceConfiguration* config)
+bool GearcolecoCore::LoadROMFromBuffer(const u8* buffer, int size, Cartridge::ForceConfiguration* config, const char* path, bool softpatching)
 {
+    Cartridge pending;
+    Cartridge* cartridge = m_pCartridge;
+
+    if (m_machine == GC_MACHINE_ADAM)
+    {
+        pending.Init();
+        cartridge = &pending;
+    }
+
+    bool loaded;
+
+    if (IsValidPointer(path))
+        loaded = cartridge->LoadFromBuffer(buffer, size, path, softpatching);
+    else
+    {
+        cartridge->Reset();
+        loaded = cartridge->LoadFromBuffer(buffer, size);
+    }
+
+    if (loaded)
+    {
+        if (cartridge == &pending)
+            m_pCartridge->Swap(pending);
+
+        if (IsValidPointer(config))
+            m_pCartridge->ForceConfig(*config);
+
+        m_machine = GC_MACHINE_COLECOVISION;
+        m_content_type = GC_CONTENT_CARTRIDGE;
+        m_adam_boot_mode = GC_ADAM_BOOT_COMPUTER;
+        EjectAllAdamMedia();
+        m_pAdam->SetEnabled(false);
+        m_pMemory->SetAdam(NULL);
+        SelectVideoChipForCartridge();
+        Reset();
+
+        m_pMemory->ResetRomDisassembledMemory();
+        m_pProcessor->DisassembleNextOPCode();
+
+        return true;
+    }
+    else
+        return false;
+}
+
+bool GearcolecoCore::LoadAdamFirmware(const u8* os7, int os7_size, const u8* eos, int eos_size, const u8* smartwriter, int smartwriter_size)
+{
+    bool loaded = m_pAdam->LoadFirmware(os7, os7_size, eos, eos_size, smartwriter, smartwriter_size);
+
+    if (loaded)
+    {
+        Log("ADAM firmware loaded (OS-7 %08X, EOS %08X, SmartWriter %08X)",
+            m_pAdam->GetFirmwareCRC(GC_ADAM_FIRMWARE_OS7),
+            m_pAdam->GetFirmwareCRC(GC_ADAM_FIRMWARE_EOS),
+            m_pAdam->GetFirmwareCRC(GC_ADAM_FIRMWARE_SMARTWRITER));
+    }
+    else
+    {
+        Error("Invalid or incomplete ADAM firmware");
+    }
+
+    return loaded;
+}
+
+bool GearcolecoCore::LoadAdamFirmware(GC_AdamFirmware firmware, const u8* data, int size)
+{
+    bool loaded = m_pAdam->LoadFirmware(firmware, data, size);
+
+    if (loaded)
+        Log("ADAM firmware role %d loaded (%d bytes, CRC32 %08X)", firmware, size,
+            m_pAdam->GetFirmwareCRC(firmware));
+    else
+        Error("Invalid ADAM firmware role %d (%d bytes)", firmware, size);
+
+    return loaded;
+}
+
+void GearcolecoCore::UnloadAdamFirmware()
+{
+    m_pAdam->UnloadFirmware();
+
+    if (m_machine == GC_MACHINE_ADAM)
+    {
+        m_pAdam->SetEnabled(false);
+        m_pMemory->SetAdam(NULL);
+        m_bPaused = true;
+    }
+}
+
+void GearcolecoCore::SetAdamRegion(Cartridge::CartridgeRegions region)
+{
+    m_adam_region = region;
+}
+
+bool GearcolecoCore::StartAdam(GC_AdamBootMode boot_mode)
+{
+    if (!m_pAdam->IsFirmwareReady())
+    {
+        Error("ADAM firmware is incomplete");
+        return false;
+    }
+
+    if ((boot_mode == GC_ADAM_BOOT_CARTRIDGE) && !m_pCartridge->IsReady())
+    {
+        Error("ADAM cartridge boot requested without a cartridge");
+        return false;
+    }
+
+    m_machine = GC_MACHINE_ADAM;
+
+    if (boot_mode == GC_ADAM_BOOT_CARTRIDGE)
+        m_content_type = GC_CONTENT_CARTRIDGE;
+    else if ((m_content_type != GC_CONTENT_ADAM_DATA_PACK) && (m_content_type != GC_CONTENT_ADAM_DISK))
+        m_content_type = GC_CONTENT_NONE;
+
+    m_adam_boot_mode = boot_mode;
+
+    SelectVideoChipForCartridge();
+    Reset(true);
+    m_pMemory->ResetRomDisassembledMemory();
+    m_pProcessor->DisassembleNextOPCode();
+    Log("ADAM started in %s mode", boot_mode == GC_ADAM_BOOT_CARTRIDGE ? "cartridge" : "computer");
+
+    return true;
+}
+
+void GearcolecoCore::PowerOffAdam()
+{
+    if (m_machine != GC_MACHINE_ADAM)
+        return;
+
+    m_pAdam->ReleaseAllKeys();
+    m_pAdam->SetEnabled(false);
+    m_pMemory->SetAdam(NULL);
+    m_bPaused = true;
+}
+
+bool GearcolecoCore::LoadAdamMediaFromBuffer(GC_AdamMediaSlot slot, GC_AdamMediaType type, const u8* data, size_t size, bool write_protected, u32 base_crc)
+{
+    if (!m_pAdam->IsFirmwareReady())
+    {
+        Error("ADAM firmware is incomplete");
+        return false;
+    }
+
+    bool starting_adam = m_machine != GC_MACHINE_ADAM;
+    GC_AdamMediaError error = m_pAdam->InsertMedia(slot, type, data, size, write_protected, base_crc);
+
+    if (error != GC_ADAM_MEDIA_ERROR_NONE)
+    {
+        Error("Invalid ADAM media for slot %d (error %d)", slot, error);
+        return false;
+    }
+
+    if (starting_adam)
+        m_content_type = (type == GC_ADAM_MEDIA_DATA_PACK) ? GC_CONTENT_ADAM_DATA_PACK : GC_CONTENT_ADAM_DISK;
+
+    if (starting_adam)
+    {
+        m_machine = GC_MACHINE_ADAM;
+        m_adam_boot_mode = GC_ADAM_BOOT_COMPUTER;
+        SelectVideoChipForCartridge();
+        Reset(true);
+        m_pMemory->ResetRomDisassembledMemory();
+        m_pProcessor->DisassembleNextOPCode();
+    }
+
+    Log("ADAM %s inserted in slot %d (%zu bytes%s)", type == GC_ADAM_MEDIA_DATA_PACK ? "data pack" : "disk", slot, size, write_protected ? ", write protected" : "");
+    return true;
+}
+
+void GearcolecoCore::EjectAdamMedia(GC_AdamMediaSlot slot)
+{
+    m_pAdam->EjectMedia(slot);
+}
+
+void GearcolecoCore::EjectAllAdamMedia()
+{
+    for (int i = 0; i < GC_ADAM_MEDIA_SLOT_COUNT; i++)
+        m_pAdam->EjectMedia((GC_AdamMediaSlot)i);
+}
+
+void GearcolecoCore::UnloadContent()
+{
+    m_pAdam->ReleaseAllKeys();
+    EjectAllAdamMedia();
+    m_pAdam->SetEnabled(false);
+    m_pMemory->SetAdam(NULL);
     m_pCartridge->Reset();
-
-    if (m_pCartridge->LoadFromBuffer(buffer, size))
-    {
-        if (IsValidPointer(config))
-            m_pCartridge->ForceConfig(*config);
-
-        SelectVideoChipForCartridge();
-        Reset();
-
-        m_pMemory->ResetRomDisassembledMemory();
-        m_pProcessor->DisassembleNextOPCode();
-
-        return true;
-    }
-    else
-        return false;
+    m_pProcessor->SetIOPOrts(m_pColecoVisionIOPorts);
+    m_machine = GC_MACHINE_COLECOVISION;
+    m_content_type = GC_CONTENT_NONE;
+    m_adam_boot_mode = GC_ADAM_BOOT_COMPUTER;
+    m_bPaused = true;
 }
 
-void GearcolecoCore::SaveDisassembledROM()
+AdamMedia* GearcolecoCore::GetAdamMedia(GC_AdamMediaSlot slot)
 {
-    GC_Disassembler_Record** biosMap = m_pMemory->GetDisassemblerBiosMap();
-    GC_Disassembler_Record** romMap = m_pMemory->GetDisassemblerRomMap();
+    return m_pAdam->GetMedia(slot);
+}
 
-    if (m_pCartridge->IsReady() && (strlen(m_pCartridge->GetFilePath()) > 0) && IsValidPointer(romMap))
+void GearcolecoCore::AdamKeyPressed(GC_AdamKey key)
+{
+    if (m_machine == GC_MACHINE_ADAM)
+        m_pAdam->KeyPressed(key);
+}
+
+void GearcolecoCore::AdamKeyReleased(GC_AdamKey key)
+{
+    if (m_machine == GC_MACHINE_ADAM)
+        m_pAdam->KeyReleased(key);
+}
+
+void GearcolecoCore::AdamReleaseAllKeys()
+{
+    if (m_machine == GC_MACHINE_ADAM)
+        m_pAdam->ReleaseAllKeys();
+}
+
+void GearcolecoCore::HostKeyPressed(u16 usage)
+{
+    if (m_machine != GC_MACHINE_ADAM)
+        return;
+
+    bool mod = m_pKeyMap->IsHostKeyDown(kHostKeyLeftHotkeyMod) || m_pKeyMap->IsHostKeyDown(kHostKeyRightHotkeyMod);
+
+    if (m_bHostHotkeys && mod && ((usage == kHostKeyF1) || (usage == kHostKeyF2)))
     {
-        using namespace std;
+        if (usage == kHostKeyF2)
+            m_pKeyMap->SetEnabled(!m_pKeyMap->IsEnabled());
+        else if (m_pKeyMapper->IsOpen())
+            m_pKeyMapper->Close();
+        else if (IsReady())
+            m_pKeyMapper->Open();
 
-        string path = string(m_pCartridge->GetFilePath()) + ".dis";
-
-        Log("Saving Disassembled ROM %s...", path.c_str());
-
-        ofstream myfile;
-        open_ofstream_utf8(myfile, path.c_str(), ios::out | ios::trunc);
-
-        if (myfile.is_open())
-        {
-            #define PAD_ADDR(digits) std::uppercase << std::hex << std::setw(digits) << std::setfill('0')
-            #define PAD_MEM(chars) std::setw(chars) << std::setfill(' ')
-
-            for (int i = 0; i < 0x2000; i++)
-            {
-                if (IsValidPointer(biosMap[i]) && (biosMap[i]->name[0] != 0))
-                {
-                    myfile << "BIOS $" << PAD_ADDR(4) << i << "   " << PAD_MEM(25) << biosMap[i]->bytes << "  " << biosMap[i]->name << "\n";
-                }
-            }
-
-            for (int i = 0; i < MAX_ROM_SIZE; i++)
-            {
-                if (IsValidPointer(romMap[i]) && (romMap[i]->name[0] != 0))
-                {
-                    myfile << "ROM  $" << PAD_ADDR(4) << i + 0x8000 << "   " << PAD_MEM(25) << romMap[i]->bytes << "  " << romMap[i]->name << "\n";
-                }
-            }
-
-            myfile.close();
-        }
-
-        Debug("Disassembled ROM Saved");
+        m_pKeyMap->IgnoreHostKey(usage);
+        m_pKeyMap->DiscardDeferredHostKeys();
+        return;
     }
+
+    m_pKeyMap->HostKeyPressed(usage);
+
+    if (m_pKeyMapper->IsOpen())
+        m_pKeyMapper->HostKey(usage, true);
+}
+
+void GearcolecoCore::HostKeyReleased(u16 usage)
+{
+    m_pKeyMap->HostKeyReleased(usage);
+
+    if (m_pKeyMapper->IsOpen())
+        m_pKeyMapper->HostKey(usage, false);
+}
+
+void GearcolecoCore::ReleaseAllHostKeys()
+{
+    m_pKeyMap->ReleaseAll();
+    m_pKeyMapper->ReleaseHostKeys();
+}
+
+void GearcolecoCore::DiscardDeferredHostKeys()
+{
+    m_pKeyMap->DiscardDeferredHostKeys();
+}
+
+void GearcolecoCore::EnableHostHotkeys(bool enable)
+{
+    m_bHostHotkeys = enable;
+}
+
+void GearcolecoCore::KeyMapCallback(void* core, GC_AdamKey key, bool pressed)
+{
+    GearcolecoCore* gearcoleco = static_cast<GearcolecoCore*>(core);
+
+    if (pressed)
+        gearcoleco->AdamKeyPressed(key);
+    else
+        gearcoleco->AdamKeyReleased(key);
+}
+
+bool GearcolecoCore::IsReady() const
+{
+    if (m_machine == GC_MACHINE_ADAM)
+        return m_pAdam->IsEnabled() && m_pAdam->IsFirmwareReady();
+
+    return m_pCartridge->IsReady() && m_pMemory->IsBiosLoaded();
+}
+
+GC_Machine GearcolecoCore::GetMachine() const
+{
+    return m_machine;
+}
+
+GC_ContentType GearcolecoCore::GetContentType() const
+{
+    return m_content_type;
+}
+
+GC_AdamBootMode GearcolecoCore::GetAdamBootMode() const
+{
+    return m_adam_boot_mode;
 }
 
 bool GearcolecoCore::GetRuntimeInfo(GC_RuntimeInfo& runtime_info)
 {
-    bool pal = m_pCartridge->IsPAL();
+    bool pal = (m_machine == GC_MACHINE_ADAM) ? m_pVideo->IsPAL() : m_pCartridge->IsPAL();
     double master_clock = pal ? GC_MASTER_CLOCK_PAL : GC_MASTER_CLOCK_NTSC;
     int lines_per_frame = pal ? GC_LINES_PER_FRAME_PAL : GC_LINES_PER_FRAME_NTSC;
+    bool f18a = m_pVideo->IsF18AHardware();
+    bool key_mapper = false;
+    int overscan_left = 0;
+    int overscan_top = 0;
 
     runtime_info.screen_width = m_pVideo->GetScreenWidth();
     runtime_info.screen_height = m_pVideo->GetScreenHeight();
     runtime_info.region = Region_NTSC;
     runtime_info.fps = master_clock / (GC_CYCLES_PER_LINE * lines_per_frame);
 
-    if (m_pCartridge->IsReady() && m_pMemory->IsBiosLoaded())
+    if (IsReady())
     {
-        if (!m_pVideo->IsF18AHardware() && (m_pVideo->GetOverscan() == Video::OverscanFull284))
+        if (!f18a && (m_pVideo->GetOverscan() == Video::OverscanFull284))
+        {
+            overscan_left = GC_RESOLUTION_SMS_OVERSCAN_H_284_L;
             runtime_info.screen_width = GC_RESOLUTION_WIDTH + GC_RESOLUTION_SMS_OVERSCAN_H_284_L + GC_RESOLUTION_SMS_OVERSCAN_H_284_R;
-        if (!m_pVideo->IsF18AHardware() && (m_pVideo->GetOverscan() == Video::OverscanFull320))
+        }
+
+        if (!f18a && (m_pVideo->GetOverscan() == Video::OverscanFull320))
+        {
+            overscan_left = GC_RESOLUTION_SMS_OVERSCAN_H_320_L;
             runtime_info.screen_width = GC_RESOLUTION_WIDTH + GC_RESOLUTION_SMS_OVERSCAN_H_320_L + GC_RESOLUTION_SMS_OVERSCAN_H_320_R;
-        if (!m_pVideo->IsF18AHardware() && (m_pVideo->GetOverscan() != Video::OverscanDisabled))
-            runtime_info.screen_height = GC_RESOLUTION_HEIGHT + (2 * (m_pCartridge->IsPAL() ? GC_RESOLUTION_OVERSCAN_V_PAL : GC_RESOLUTION_OVERSCAN_V));
-        runtime_info.region = m_pCartridge->IsPAL() ? Region_PAL : Region_NTSC;
-        return true;
+        }
+
+        if (!f18a && (m_pVideo->GetOverscan() != Video::OverscanDisabled))
+        {
+            overscan_top = pal ? GC_RESOLUTION_OVERSCAN_V_PAL : GC_RESOLUTION_OVERSCAN_V;
+            runtime_info.screen_height = GC_RESOLUTION_HEIGHT + (2 * overscan_top);
+        }
+
+        runtime_info.region = pal ? Region_PAL : Region_NTSC;
+
+        if (IsValidPointer(m_pKeyMapper) && m_pKeyMapper->IsOpen())
+        {
+            key_mapper = true;
+            runtime_info.screen_width = m_pKeyMapper->GetWidth();
+            runtime_info.screen_height = m_pKeyMapper->GetHeight();
+        }
     }
 
-    return false;
+    double pixel_clock = master_clock * GC_PIXELS_PER_LINE / GC_CYCLES_PER_LINE;
+    if (runtime_info.screen_width > GC_RESOLUTION_WIDTH_WITH_OVERSCAN)
+        pixel_clock *= 2.0;
+
+    runtime_info.pixel_clock = (float)(pixel_clock / 1000000.0);
+    runtime_info.line_rate = (float)(master_clock / GC_CYCLES_PER_LINE / 1000.0);
+    runtime_info.source_lines = runtime_info.screen_height;
+
+    runtime_info.active_region[0] = 0;
+    runtime_info.active_region[1] = 0;
+    runtime_info.active_region[2] = runtime_info.screen_width;
+    runtime_info.active_region[3] = runtime_info.screen_height;
+
+    bool legacy_frame = !f18a || (!m_pVideo->IsF18AUnlocked() && (runtime_info.screen_width == GC_RESOLUTION_WIDTH));
+
+    if (IsReady() && !key_mapper && legacy_frame)
+    {
+        runtime_info.active_region[0] = overscan_left;
+        runtime_info.active_region[1] = overscan_top;
+        runtime_info.active_region[2] = GC_RESOLUTION_WIDTH;
+        runtime_info.active_region[3] = GC_RESOLUTION_HEIGHT;
+
+        if ((m_pVideo->GetMode() & 0x01) != 0)
+        {
+            runtime_info.active_region[0] += f18a ? ((GC_RESOLUTION_WIDTH - GC_RESOLUTION_TEXT_WIDTH) / 2) : GC_RESOLUTION_TEXT_BORDER_L;
+            runtime_info.active_region[2] = GC_RESOLUTION_TEXT_WIDTH;
+        }
+    }
+
+    runtime_info.chroma_origin = 0.0f;
+    runtime_info.chroma_texel_cycles = 0.0f;
+    runtime_info.chroma_line_cycles = 0.0f;
+    runtime_info.chroma_frame_cycles = 0.0f;
+
+    if (!pal && !f18a && !key_mapper)
+    {
+        double texel_cycles = (double)GC_CYCLES_PER_LINE / (double)GC_PIXELS_PER_LINE;
+        double origin = 1.0 - fmod((double)overscan_left * texel_cycles, 1.0);
+        if (origin >= 1.0)
+            origin -= 1.0;
+
+        runtime_info.chroma_origin = (float)origin;
+        runtime_info.chroma_texel_cycles = (float)texel_cycles;
+        runtime_info.chroma_line_cycles = (float)GC_CYCLES_PER_LINE;
+    }
+
+    runtime_info.border_color[0] = 0;
+    runtime_info.border_color[1] = 0;
+    runtime_info.border_color[2] = 0;
+    runtime_info.border_valid = IsReady() && !key_mapper;
+
+    if (runtime_info.border_valid)
+        m_pVideo->GetBackdropColor(runtime_info.border_color);
+
+    runtime_info.system_type = f18a ? 1 : 0;
+    runtime_info.video_mode = m_pVideo->GetMode();
+
+    return IsReady();
 }
 
 Memory* GearcolecoCore::GetMemory()
@@ -400,9 +787,57 @@ TraceLogger* GearcolecoCore::GetTraceLogger()
     return m_pTraceLogger;
 }
 
+Profiler* GearcolecoCore::GetProfiler()
+{
+    return m_pProfiler;
+}
+
+Adam* GearcolecoCore::GetAdam()
+{
+    return m_pAdam;
+}
+
+KeyMap* GearcolecoCore::GetKeyMap()
+{
+    return m_pKeyMap;
+}
+
+KeyMapper* GearcolecoCore::GetKeyMapper()
+{
+    return m_pKeyMapper;
+}
+
 u64 GearcolecoCore::GetMasterClockCycles()
 {
     return m_MasterClockCycles;
+}
+
+bool GearcolecoCore::GetAdamDebugState(GC_AdamDebugState* state)
+{
+    if (!IsValidPointer(state))
+        return false;
+
+    m_pAdam->GetDebugState(state);
+    state->content_type = m_content_type;
+    state->master_clock_cycles = m_MasterClockCycles;
+
+    if (m_machine != GC_MACHINE_ADAM)
+    {
+        state->valid = false;
+        return false;
+    }
+
+    for (int page = 0; page < GC_ADAM_DEBUG_PAGE_COUNT; page++)
+    {
+        GC_AdamDebugMemoryPage* debug_page = &state->pages[page];
+        if (debug_page->read_source == Adam::MemorySourceCartridge)
+        {
+            debug_page->read_offset = m_pMemory->GetCartridgeROMOffset(debug_page->start);
+            debug_page->cartridge_bank = m_pMemory->GetBank(debug_page->start);
+        }
+    }
+
+    return state->valid;
 }
 
 void GearcolecoCore::KeyPressed(GC_Controllers controller, GC_Keys key)
@@ -443,8 +878,43 @@ bool GearcolecoCore::IsPaused()
     return m_bPaused;
 }
 
+void GearcolecoCore::ResetAdamComputer()
+{
+    if (m_machine != GC_MACHINE_ADAM || !IsReady())
+        return;
+
+    m_adam_boot_mode = GC_ADAM_BOOT_COMPUTER;
+
+    if (m_content_type == GC_CONTENT_CARTRIDGE)
+        m_content_type = GC_CONTENT_NONE;
+
+    ResetROM();
+}
+
 void GearcolecoCore::ResetROM(Cartridge::ForceConfiguration* config)
 {
+    if (m_machine == GC_MACHINE_ADAM)
+    {
+        if (!IsReady())
+            return;
+
+        Log(GEARCOLECO_TITLE " RESET");
+
+        if (IsValidPointer(config))
+        {
+            SetAdamRegion(config->region);
+            if (m_pCartridge->IsReady())
+                m_pCartridge->ForceConfig(*config);
+        }
+
+        GC_VideoChip previous_video_chip = m_video_chip;
+        SelectVideoChipForCartridge();
+        Reset(false, m_video_chip != previous_video_chip);
+        m_pProcessor->DisassembleNextOPCode();
+
+        return;
+    }
+
     if (m_pCartridge->IsReady())
     {
         Log(GEARCOLECO_TITLE " RESET");
@@ -461,6 +931,12 @@ void GearcolecoCore::ResetROM(Cartridge::ForceConfiguration* config)
 
 void GearcolecoCore::ResetROMPreservingRAM(Cartridge::ForceConfiguration* config)
 {
+    if ((m_machine == GC_MACHINE_ADAM) && !m_pCartridge->IsReady())
+    {
+        ResetROM(config);
+        return;
+    }
+
     if (m_pCartridge->IsReady())
     {
         Mapper* pMapper = m_pMemory->GetMapper();
@@ -489,11 +965,6 @@ void GearcolecoCore::ResetROMPreservingRAM(Cartridge::ForceConfiguration* config
             ResetROM(config);
         }
     }
-}
-
-void GearcolecoCore::ResetSound()
-{
-    m_pAudio->Reset(m_pCartridge->IsPAL());
 }
 
 void GearcolecoCore::SaveRam()
@@ -672,14 +1143,15 @@ bool GearcolecoCore::SaveState(const char* path, int index, bool screenshot)
     using namespace std;
 
     string full_path = GetSaveStatePath(path, index);
+    string temp_path = full_path + ".tmp";
     Log("Save state file: %s", full_path.c_str());
 
     ofstream file;
-    open_ofstream_utf8(file, full_path.c_str(), ios::out | ios::binary);
+    open_ofstream_utf8(file, temp_path.c_str(), ios::out | ios::binary);
 
     if (!file.is_open())
     {
-        Error("Failed to open save state file for writing: %s", full_path.c_str());
+        Error("Failed to open save state file for writing: %s", temp_path.c_str());
         return false;
     }
 
@@ -687,14 +1159,16 @@ bool GearcolecoCore::SaveState(const char* path, int index, bool screenshot)
     if (!SaveState(file, size, screenshot))
     {
         file.close();
+        remove_file_utf8(temp_path.c_str());
         Error("Failed to save state to file: %s", full_path.c_str());
         return false;
     }
 
     file.close();
 
-    if (!file.good())
+    if (!file.good() || !rename_file_utf8(temp_path.c_str(), full_path.c_str()))
     {
+        remove_file_utf8(temp_path.c_str());
         Error("Failed to write save state file: %s", full_path.c_str());
         return false;
     }
@@ -706,22 +1180,25 @@ bool GearcolecoCore::SaveState(const char* path, int index, bool screenshot)
 bool GearcolecoCore::SaveState(u8* buffer, size_t& size, bool screenshot)
 {
     using namespace std;
+#if defined(__LIBRETRO__)
+    size_t fixed_size = GetLibretroSaveStateSize();
+#endif
 
     Debug("Saving state to buffer [%d bytes]...", size);
 
-    if (!m_pCartridge->IsReady())
+    if (!IsReady())
     {
-        Error("Cartridge is not ready when trying to save state");
+        Error("Machine is not ready when trying to save state");
         return false;
     }
 
     if (!IsValidPointer(buffer))
     {
 #if defined(__LIBRETRO__)
-        size = GC_LIBRETRO_SAVESTATE_SIZE;
+        size = fixed_size;
         return true;
 #else
-        stringstream stream;
+        counting_stream stream;
         if (!SaveState(stream, size, screenshot))
         {
             Error("Failed to save state to stream to calculate size");
@@ -733,7 +1210,7 @@ bool GearcolecoCore::SaveState(u8* buffer, size_t& size, bool screenshot)
     else
     {
 #if defined(__LIBRETRO__)
-        if (size < GC_LIBRETRO_SAVESTATE_SIZE)
+        if (size < fixed_size)
         {
             Error("Failed to save state to buffer: output buffer is too small");
             return false;
@@ -755,17 +1232,17 @@ bool GearcolecoCore::SaveState(u8* buffer, size_t& size, bool screenshot)
         }
 
 #if defined(__LIBRETRO__)
-        if ((size < sizeof(GC_SaveState_Header_Libretro)) || (size > GC_LIBRETRO_SAVESTATE_SIZE))
+        if ((size < sizeof(GC_SaveState_Header_Libretro)) || (size > fixed_size))
         {
             Error("Invalid libretro save-state size: %zu", size);
             return false;
         }
 
         size_t source_header = size - sizeof(GC_SaveState_Header_Libretro);
-        size_t destination_header = GC_LIBRETRO_SAVESTATE_SIZE - sizeof(GC_SaveState_Header_Libretro);
+        size_t destination_header = fixed_size - sizeof(GC_SaveState_Header_Libretro);
         memmove(buffer + destination_header, buffer + source_header, sizeof(GC_SaveState_Header_Libretro));
-        memset(buffer + source_header, 0, GC_LIBRETRO_SAVESTATE_SIZE - size);
-        size = GC_LIBRETRO_SAVESTATE_SIZE;
+        memset(buffer + source_header, 0, fixed_size - size);
+        size = fixed_size;
 #else
         size = direct_stream.size();
 #endif
@@ -779,11 +1256,28 @@ bool GearcolecoCore::SaveState(std::ostream& stream, size_t& size, bool screensh
     UNUSED(screenshot);
 #endif
 
-    if (m_pCartridge->IsReady())
+    if (IsReady())
     {
         Debug("Gathering save state data...");
 
+        u8 machine = (u8)m_machine;
+        u8 content_type = (u8)m_content_type;
+        u8 adam_boot_mode = (u8)m_adam_boot_mode;
+        stream.write(reinterpret_cast<const char*>(&machine), sizeof(machine));
+        stream.write(reinterpret_cast<const char*>(&content_type), sizeof(content_type));
+        stream.write(reinterpret_cast<const char*>(&adam_boot_mode), sizeof(adam_boot_mode));
+        if (m_machine == GC_MACHINE_ADAM)
+        {
+            u32 cartridge_crc = m_pCartridge->GetCRC();
+            u32 cartridge_size = (u32)m_pCartridge->GetROMSize();
+            u32 cartridge_type = (u32)m_pCartridge->GetType();
+            stream.write(reinterpret_cast<const char*>(&cartridge_crc), sizeof(cartridge_crc));
+            stream.write(reinterpret_cast<const char*>(&cartridge_size), sizeof(cartridge_size));
+            stream.write(reinterpret_cast<const char*>(&cartridge_type), sizeof(cartridge_type));
+        }
         stream.write(reinterpret_cast<const char*>(&m_video_chip), sizeof(m_video_chip));
+        if (m_machine == GC_MACHINE_ADAM)
+            m_pAdam->SaveState(stream);
         m_pMemory->SaveState(stream);
         m_pProcessor->SaveState(stream);
         m_pAudio->SaveState(stream);
@@ -803,9 +1297,10 @@ bool GearcolecoCore::SaveState(std::ostream& stream, size_t& size, bool screensh
 
         size_t data_size = static_cast<size_t>(stream.tellp());
 
-        if ((data_size + sizeof(header)) > GC_LIBRETRO_SAVESTATE_SIZE)
+        size_t fixed_size = GetLibretroSaveStateSize();
+        if ((data_size + sizeof(header)) > fixed_size)
         {
-            Error("Libretro save state exceeds fixed %d-byte size", GC_LIBRETRO_SAVESTATE_SIZE);
+            Error("Libretro save state exceeds fixed %zu-byte size", fixed_size);
             return false;
         }
 #else
@@ -814,14 +1309,22 @@ bool GearcolecoCore::SaveState(std::ostream& stream, size_t& size, bool screensh
         header.magic = GC_SAVESTATE_MAGIC;
         header.version = GC_SAVESTATE_VERSION;
         header.timestamp = time(NULL);
-        strncpy_fit(header.rom_name, m_pCartridge->GetFileName(), sizeof(header.rom_name));
-        header.rom_crc = m_pCartridge->GetCRC();
+        if (m_machine == GC_MACHINE_ADAM)
+        {
+            strncpy_fit(header.rom_name, "ADAM", sizeof(header.rom_name));
+            header.rom_crc = m_pAdam->GetFirmwareCRC(GC_ADAM_FIRMWARE_EOS);
+        }
+        else
+        {
+            strncpy_fit(header.rom_name, m_pCartridge->GetFileName(), sizeof(header.rom_name));
+            header.rom_crc = m_pCartridge->GetCRC();
+        }
         strncpy_fit(header.emu_build, GEARCOLECO_VERSION, sizeof(header.emu_build));
 
         Debug("Save state header magic: 0x%08x", header.magic);
         Debug("Save state header version: %d", header.version);
 
-        if (screenshot && IsValidPointer(m_pFrameBuffer))
+        if (screenshot && IsValidPointer(m_pFrameBuffer) && !m_pKeyMapper->IsOpen())
         {
             GC_RuntimeInfo runtime_info;
             GetRuntimeInfo(runtime_info);
@@ -858,6 +1361,12 @@ bool GearcolecoCore::SaveState(std::ostream& stream, size_t& size, bool screensh
     return false;
 }
 
+size_t GearcolecoCore::GetLibretroSaveStateSize() const
+{
+    return m_machine == GC_MACHINE_ADAM ? GC_LIBRETRO_SAVESTATE_SIZE_ADAM :
+        GC_LIBRETRO_SAVESTATE_SIZE_COLECOVISION;
+}
+
 bool GearcolecoCore::LoadState(const char* path, int index)
 {
     Log("Loading save state...");
@@ -872,7 +1381,7 @@ bool GearcolecoCore::LoadState(const char* path, int index)
 
     if (!file.fail())
     {
-        if (LoadState(file))
+        if (LoadStateTransactional(file))
         {
             Debug("Save state loaded");
             file.close();
@@ -894,9 +1403,9 @@ bool GearcolecoCore::LoadState(const u8* buffer, size_t size)
 
     Debug("Loading state from buffer [%d bytes]...", size);
 
-    if (!m_pCartridge->IsReady())
+    if (!IsReady())
     {
-        Error("Cartridge is not ready when trying to load state");
+        Error("Machine is not ready when trying to load state");
         return false;
     }
 
@@ -907,12 +1416,45 @@ bool GearcolecoCore::LoadState(const u8* buffer, size_t size)
     }
 
     memory_input_stream direct_stream(reinterpret_cast<const char*>(buffer), size);
-    return LoadState(direct_stream);
+    return LoadStateTransactional(direct_stream);
 }
 
-bool GearcolecoCore::LoadState(std::istream& stream)
+bool GearcolecoCore::LoadStateTransactional(std::istream& stream)
 {
-    if (m_pCartridge->IsReady())
+    if (m_machine != GC_MACHINE_ADAM)
+        return LoadStateInternal(stream);
+
+    size_t backup_size = 0;
+    if (!SaveState((u8*)NULL, backup_size, false))
+        return false;
+
+    if (backup_size > m_StateBackupCapacity)
+    {
+        SafeDeleteArray(m_pStateBackup);
+        m_pStateBackup = new u8[backup_size];
+        m_StateBackupCapacity = backup_size;
+    }
+
+    if (!SaveState(m_pStateBackup, backup_size, false))
+        return false;
+
+    bool loaded = LoadStateInternal(stream);
+    if (!loaded)
+    {
+#if !defined(__LIBRETRO__)
+        EjectAllAdamMedia();
+#endif
+        memory_input_stream backup_stream(reinterpret_cast<const char*>(m_pStateBackup), backup_size);
+        if (!LoadStateInternal(backup_stream))
+            Error("Unable to restore live state after failed load");
+    }
+
+    return loaded;
+}
+
+bool GearcolecoCore::LoadStateInternal(std::istream& stream)
+{
+    if (IsReady())
     {
         using namespace std;
 
@@ -924,10 +1466,11 @@ bool GearcolecoCore::LoadState(std::istream& stream)
         GC_SaveState_Header_Libretro header = {};
 #if !defined(__LIBRETRO__)
         bool is_desktop_savestate = false;
+        size_t state_data_size = 0;
 #endif
 
-        // Try desktop header first (larger, contains all info)
         GC_SaveState_Header desktop_header;
+
         if (size >= sizeof(desktop_header))
         {
             stream.seekg(size - sizeof(desktop_header), ios::beg);
@@ -944,7 +1487,6 @@ bool GearcolecoCore::LoadState(std::istream& stream)
             }
         }
 
-        // Fallback to libretro header
         if ((header.magic != GC_SAVESTATE_MAGIC) && (size >= sizeof(header)))
         {
             stream.seekg(size - sizeof(header), ios::beg);
@@ -975,20 +1517,80 @@ bool GearcolecoCore::LoadState(std::istream& stream)
                     Error("Invalid save state size: %d", desktop_header.size);
                     return false;
                 }
+
+                if (!IsValidStateScreenshot(desktop_header, size))
+                {
+                    Error("Invalid save state screenshot metadata");
+                    return false;
+                }
+                state_data_size = size - sizeof(desktop_header) - desktop_header.screenshot_size;
             }
 #endif
 
             Log("Loading state (v%d)...", header.version);
 
+            GC_ContentType state_content_type = m_content_type;
+            GC_AdamBootMode state_adam_boot_mode = m_adam_boot_mode;
+
+            if (header.version >= 107)
+            {
+                u8 machine = 0;
+                u8 content_type = 0;
+                u8 adam_boot_mode = 0;
+                stream.read(reinterpret_cast<char*>(&machine), sizeof(machine));
+                stream.read(reinterpret_cast<char*>(&content_type), sizeof(content_type));
+                stream.read(reinterpret_cast<char*>(&adam_boot_mode), sizeof(adam_boot_mode));
+
+                if (!stream.good() || !IsValidStateIdentity(machine, content_type, adam_boot_mode) || (machine != m_machine))
+                {
+                    Error("Incompatible machine, content, or boot mode in save state");
+                    return false;
+                }
+
+                state_content_type = (GC_ContentType)content_type;
+                state_adam_boot_mode = (GC_AdamBootMode)adam_boot_mode;
+            }
+            else if (m_machine != GC_MACHINE_COLECOVISION)
+            {
+                Error("Legacy save state is not an ADAM state");
+                return false;
+            }
+
+            if (m_machine == GC_MACHINE_ADAM)
+            {
+                if (header.version < 108)
+                {
+                    Error("ADAM states before version 108 lack cartridge identity");
+                    return false;
+                }
+
+                u32 cartridge_crc = 0;
+                u32 cartridge_size = 0;
+                u32 cartridge_type = 0;
+                stream.read(reinterpret_cast<char*>(&cartridge_crc), sizeof(cartridge_crc));
+                stream.read(reinterpret_cast<char*>(&cartridge_size), sizeof(cartridge_size));
+                stream.read(reinterpret_cast<char*>(&cartridge_type), sizeof(cartridge_type));
+                if (!stream.good() || (cartridge_crc != m_pCartridge->GetCRC()) ||
+                    (cartridge_size != (u32)m_pCartridge->GetROMSize()) ||
+                    (cartridge_type != (u32)m_pCartridge->GetType()) ||
+                    ((state_adam_boot_mode == GC_ADAM_BOOT_CARTRIDGE) && !m_pCartridge->IsReady()))
+                {
+                    Error("Incompatible cartridge in ADAM save state");
+                    return false;
+                }
+            }
+
             if (header.version >= 106)
             {
                 GC_VideoChip video_chip;
                 stream.read(reinterpret_cast<char*>(&video_chip), sizeof(video_chip));
+
                 if ((video_chip != GC_VIDEO_CHIP_TMS9918A) && (video_chip != GC_VIDEO_CHIP_F18A))
                 {
                     Error("Invalid video chip in save state");
                     return false;
                 }
+
                 SelectVideoChip(video_chip);
             }
             else
@@ -996,7 +1598,46 @@ bool GearcolecoCore::LoadState(std::istream& stream)
                 SelectVideoChip(GC_VIDEO_CHIP_TMS9918A);
             }
 
+            if (m_machine == GC_MACHINE_ADAM)
+            {
+                if (!m_pAdam->LoadState(stream, state_adam_boot_mode))
+                {
+                    Error("Invalid or incompatible ADAM state");
+                    return false;
+                }
+
+#if !defined(__LIBRETRO__)
+                if (is_desktop_savestate)
+                {
+                    counting_stream remaining;
+                    m_pMemory->SaveState(remaining);
+                    m_pProcessor->SaveState(remaining);
+                    m_pAudio->SaveState(remaining);
+                    m_pVideo->SaveState(remaining);
+                    m_pInput->SaveState(remaining);
+                    std::streampos position = stream.tellg();
+                    if (!remaining.good() || (position < std::streampos(0)) ||
+                        ((size_t)position > state_data_size) ||
+                        (remaining.size() != state_data_size - (size_t)position))
+                    {
+                        Error("Invalid ADAM state data size");
+                        return false;
+                    }
+                }
+#endif
+            }
+
+            m_content_type = state_content_type;
+            m_adam_boot_mode = state_adam_boot_mode;
+
             m_pMemory->LoadState(stream);
+
+            if (!stream.good())
+            {
+                Error("Invalid memory or cartridge mapper state");
+                return false;
+            }
+
             m_pProcessor->LoadState(stream, header.version);
 
             if (header.version <= 102)
@@ -1007,10 +1648,9 @@ bool GearcolecoCore::LoadState(std::istream& stream)
             m_pVideo->LoadState(stream, header.version);
             m_pInput->LoadState(stream, header.version);
 
-            return true;
+            return stream.good();
         }
 
-        // Try legacy V1 format (8-byte trailer: magic + size)
         if (size >= (2 * sizeof(u32)))
         {
             u32 v1_magic = 0;
@@ -1025,12 +1665,18 @@ bool GearcolecoCore::LoadState(std::istream& stream)
             Debug("Load state V1 magic: 0x%08x", v1_magic);
             Debug("Load state V1 size: %d", v1_size);
 
-            if ((v1_size == size) && (v1_magic == GC_SAVESTATE_MAGIC))
+            if ((m_machine == GC_MACHINE_COLECOVISION) && (v1_size == size) &&
+                (v1_magic == GC_SAVESTATE_MAGIC))
             {
                 Log("Loading legacy state...");
 
                 SelectVideoChip(GC_VIDEO_CHIP_TMS9918A);
                 m_pMemory->LoadState(stream);
+                if (!stream.good())
+                {
+                    Error("Invalid memory or cartridge mapper state");
+                    return false;
+                }
                 m_pProcessor->LoadState(stream, GC_SAVESTATE_VERSION_V1);
                 m_pAudio->LoadStateV1(stream);
                 m_pVideo->LoadState(stream, GC_SAVESTATE_VERSION_V1);
@@ -1050,9 +1696,42 @@ bool GearcolecoCore::LoadState(std::istream& stream)
     return false;
 }
 
+bool GearcolecoCore::IsValidStateScreenshot(const GC_SaveState_Header& header, size_t file_size)
+{
+    if ((file_size < sizeof(header)) || (header.screenshot_size > file_size - sizeof(header)))
+        return false;
+
+    if (header.screenshot_size == 0)
+        return true;
+
+    if ((header.screenshot_width == 0) || (header.screenshot_height == 0) || (header.screenshot_width > GC_VIDEO_MAX_WIDTH) || (header.screenshot_height > GC_VIDEO_MAX_HEIGHT))
+        return false;
+
+    size_t pixels = (size_t)header.screenshot_width * header.screenshot_height;
+
+    return (header.screenshot_size == pixels * 2) || (header.screenshot_size == pixels * 4);
+}
+
+bool GearcolecoCore::IsValidStateIdentity(u8 machine, u8 content_type, u8 adam_boot_mode)
+{
+    if ((machine < GC_MACHINE_COLECOVISION) || (machine > GC_MACHINE_ADAM) || (content_type > GC_CONTENT_ADAM_DISK) || (adam_boot_mode > GC_ADAM_BOOT_CARTRIDGE))
+        return false;
+
+    if (machine == GC_MACHINE_COLECOVISION)
+        return (content_type == GC_CONTENT_CARTRIDGE) && (adam_boot_mode == GC_ADAM_BOOT_COMPUTER);
+
+    if (adam_boot_mode == GC_ADAM_BOOT_CARTRIDGE)
+        return content_type == GC_CONTENT_CARTRIDGE;
+
+    return content_type != GC_CONTENT_CARTRIDGE;
+}
+
 bool GearcolecoCore::GetSaveStateHeader(int index, const char* path, GC_SaveState_Header* header)
 {
     using namespace std;
+
+    if (!IsValidPointer(header))
+        return false;
 
     string full_path = GetSaveStatePath(path, index);
     Debug("Loading state header from %s...", full_path.c_str());
@@ -1073,13 +1752,17 @@ bool GearcolecoCore::GetSaveStateHeader(int index, const char* path, GC_SaveStat
 
     if (savestate_size >= sizeof(GC_SaveState_Header))
     {
+        GC_SaveState_Header candidate = {};
         stream.seekg(savestate_size - sizeof(GC_SaveState_Header), ios::beg);
-        stream.read(reinterpret_cast<char*>(header), sizeof(GC_SaveState_Header));
+        stream.read(reinterpret_cast<char*>(&candidate), sizeof(candidate));
 
-        if ((header->magic == GC_SAVESTATE_MAGIC) && (header->size == savestate_size))
+        if (stream.good() && (candidate.magic == GC_SAVESTATE_MAGIC) && (candidate.size == savestate_size))
         {
+            bool valid = IsValidStateScreenshot(candidate, savestate_size);
+            if (valid)
+                *header = candidate;
             stream.close();
-            return true;
+            return valid;
         }
     }
 
@@ -1094,7 +1777,7 @@ bool GearcolecoCore::GetSaveStateHeader(int index, const char* path, GC_SaveStat
         stream.read(reinterpret_cast<char*>(&v1_magic), sizeof(v1_magic));
         stream.read(reinterpret_cast<char*>(&v1_size), sizeof(v1_size));
 
-        if ((v1_magic == GC_SAVESTATE_MAGIC) && (v1_size == savestate_size))
+        if (stream.good() && (v1_magic == GC_SAVESTATE_MAGIC) && (v1_size == savestate_size))
         {
             memset(header, 0, sizeof(GC_SaveState_Header));
             header->magic = v1_magic;
@@ -1164,18 +1847,38 @@ bool GearcolecoCore::GetSaveStateScreenshot(int index, const char* path, GC_Save
     stream.read(reinterpret_cast<char*>(screenshot->data), screenshot->size);
     stream.close();
 
-    return true;
+    return stream.good();
 }
 
-void GearcolecoCore::Reset()
+void GearcolecoCore::Reset(bool cold, bool video_changed)
 {
     m_MasterClockCycles = 0;
+
+    if (IsValidPointer(m_pProfiler))
+        m_pProfiler->Reset();
+
     m_pMemory->SetupMapper();
+    m_pAdam->SetMapper(m_pMemory->GetMapper());
+    m_pAdam->SetEnabled(m_machine == GC_MACHINE_ADAM);
+    m_pMemory->SetAdam(m_machine == GC_MACHINE_ADAM ? m_pAdam : NULL);
+    m_pProcessor->SetIOPOrts(m_machine == GC_MACHINE_ADAM ? static_cast<IOPorts*>(m_pAdam) : static_cast<IOPorts*>(m_pColecoVisionIOPorts));
     m_pMemory->Reset();
-    m_pProcessor->Reset();
-    m_pAudio->Reset(m_pCartridge->IsPAL());
-    m_pVideo->Reset(m_pCartridge->IsPAL());
-    m_pInput->Reset();
+
+    if (m_machine == GC_MACHINE_ADAM)
+        m_pAdam->Reset(cold, m_adam_boot_mode);
+
+    m_pProcessor->Reset(cold || m_machine != GC_MACHINE_ADAM);
+    bool pal = m_pCartridge->IsPAL();
+    if ((m_machine == GC_MACHINE_ADAM) && (m_adam_region != Cartridge::CartridgeUnknownRegion))
+        pal = m_adam_region == Cartridge::CartridgePAL;
+
+    if (cold || m_machine != GC_MACHINE_ADAM || video_changed || m_pVideo->IsPAL() != pal)
+    {
+        m_pAudio->Reset(pal);
+        m_pVideo->Reset(pal);
+        m_pInput->Reset();
+    }
+
     m_pColecoVisionIOPorts->Reset();
     m_bPaused = false;
 }
@@ -1184,9 +1887,9 @@ void GearcolecoCore::RenderFrameBuffer(u8* finalFrameBuffer)
 {
     GC_RuntimeInfo runtime_info;
     GetRuntimeInfo(runtime_info);
-    int size = m_pMemory->IsBiosLoaded() ? runtime_info.screen_width * runtime_info.screen_height :
+    int size = IsReady() ? runtime_info.screen_width * runtime_info.screen_height :
         GC_RESOLUTION_WIDTH * GC_RESOLUTION_HEIGHT;
-    u16* srcBuffer = (m_pMemory->IsBiosLoaded() ? m_pVideo->GetFrameBuffer() : kNoBiosImage);
+    u16* srcBuffer = (IsReady() ? m_pVideo->GetFrameBuffer() : kNoBiosImage);
 
     switch (m_pixelFormat)
     {
@@ -1205,4 +1908,21 @@ void GearcolecoCore::RenderFrameBuffer(u8* finalFrameBuffer)
             break;
         }
     }
+}
+
+void GearcolecoCore::RenderIndexFrame(u8* finalIndexBuffer)
+{
+    GC_RuntimeInfo runtime_info;
+    GetRuntimeInfo(runtime_info);
+    int size = IsReady() ? runtime_info.screen_width * runtime_info.screen_height :
+        GC_RESOLUTION_WIDTH * GC_RESOLUTION_HEIGHT;
+
+    if (IsReady() && IsValidPointer(m_pKeyMapper) && m_pKeyMapper->IsOpen())
+    {
+        memset(finalIndexBuffer, 0, size);
+        return;
+    }
+
+    u16* srcBuffer = (IsReady() ? m_pVideo->GetFrameBuffer() : kNoBiosImage);
+    m_pVideo->RenderIndices(srcBuffer, finalIndexBuffer, size, true);
 }

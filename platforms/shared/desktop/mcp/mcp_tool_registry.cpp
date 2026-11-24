@@ -205,12 +205,14 @@ static const McpToolCategory kMcpToolCategories[] =
     {"symbols", "Symbols", "Add, remove, load, list, and look up debug symbols or labels."},
     {"hardware_video", "Video Hardware", "Inspect TMS9918A VDP registers, display timing, status, sprites, scanlines, and video state."},
     {"hardware_audio", "Audio Hardware", "Inspect ColecoVision PSG and AY-3-8910 audio state, channels, mixer, and sound registers."},
-    {"media", "Media", "Load ROMs, list recent media, load symbols, and inspect loaded cartridge/media information."},
-    {"capture", "Capture", "Capture current screenshots and ColecoVision sprite images or sprite metadata."},
+    {"hardware_adam", "ADAM Hardware", "Inspect ADAM firmware, MIOC/control mapping, ADAMnet PCB/DCBs, transfers, timing, and keyboard state."},
+    {"media", "Media", "Start ADAM, load cartridges, ADAM media, or BIOS/firmware files, list recent media, load symbols, and inspect the active machine and slots."},
+    {"capture", "Capture", "Capture current screenshots, record AVI video, and ColecoVision sprite images or sprite metadata."},
     {"state", "Save States", "List save slots, select a slot, save emulator state, and load emulator state."},
     {"rewind", "Rewind", "Inspect rewind buffer status and seek to rewind snapshots for time-travel debugging."},
-    {"input", "Input", "Inspect, press, release, tap, or macro controller input."},
+    {"input", "Input", "Inspect or control ColecoVision controllers and semantic ADAM keyboard input."},
     {"trace", "Trace", "Read trace log entries and configure CPU, interrupt, video, audio, memory, and debug-message tracing."},
+    {"profiler", "Profiler", "Start, stop, or reset the function profiler and read per-function call counts and cycle statistics."},
     {"tools", "Other Tools", "Additional emulator/debugger tools that do not fit another category."}
 };
 
@@ -262,14 +264,20 @@ static const char* const kMcpAudioTools[] =
     "get_psg_status", "get_ay8910_status"
 };
 
+static const char* const kMcpAdamTools[] =
+{
+    "get_adam_status", "get_adamnet_status"
+};
+
 static const char* const kMcpMediaTools[] =
 {
-    "load_media", "get_media_info", "list_recent_media"
+    "start_adam", "load_media", "load_bios", "get_media_info", "list_adam_media", "list_recent_media",
+    "get_adam_printer_output", "clear_adam_printer_output"
 };
 
 static const char* const kMcpCaptureTools[] =
 {
-    "get_screenshot", "list_sprites", "get_sprite_image"
+    "get_screenshot", "start_video_recording", "stop_video_recording", "list_sprites", "get_sprite_image"
 };
 
 static const char* const kMcpStateTools[] =
@@ -285,12 +293,18 @@ static const char* const kMcpRewindTools[] =
 
 static const char* const kMcpInputTools[] =
 {
-    "controller_button", "controller_macro", "get_input_state"
+    "controller_button", "adam_keyboard", "controller_macro", "get_input_state",
+    "get_key_map", "set_key_binding", "set_key_mapping", "host_key", "open_key_mapper", "close_key_mapper"
 };
 
 static const char* const kMcpTraceTools[] =
 {
     "get_trace_log", "set_trace_log"
+};
+
+static const char* const kMcpProfilerTools[] =
+{
+    "set_profiler", "get_profiler_data"
 };
 
 static const McpToolCategoryTools kMcpToolCategoryTools[] =
@@ -303,12 +317,14 @@ static const McpToolCategoryTools kMcpToolCategoryTools[] =
     {"symbols", kMcpSymbolTools, MCP_ARRAY_COUNT(kMcpSymbolTools)},
     {"hardware_video", kMcpVideoTools, MCP_ARRAY_COUNT(kMcpVideoTools)},
     {"hardware_audio", kMcpAudioTools, MCP_ARRAY_COUNT(kMcpAudioTools)},
+    {"hardware_adam", kMcpAdamTools, MCP_ARRAY_COUNT(kMcpAdamTools)},
     {"media", kMcpMediaTools, MCP_ARRAY_COUNT(kMcpMediaTools)},
     {"capture", kMcpCaptureTools, MCP_ARRAY_COUNT(kMcpCaptureTools)},
     {"state", kMcpStateTools, MCP_ARRAY_COUNT(kMcpStateTools)},
     {"rewind", kMcpRewindTools, MCP_ARRAY_COUNT(kMcpRewindTools)},
     {"input", kMcpInputTools, MCP_ARRAY_COUNT(kMcpInputTools)},
-    {"trace", kMcpTraceTools, MCP_ARRAY_COUNT(kMcpTraceTools)}
+    {"trace", kMcpTraceTools, MCP_ARRAY_COUNT(kMcpTraceTools)},
+    {"profiler", kMcpProfilerTools, MCP_ARRAY_COUNT(kMcpProfilerTools)}
 };
 
 const size_t kMcpSearchToolLimit = 20;
@@ -575,11 +591,6 @@ json McpToolRegistry::SearchTools(const std::string& query) const
     return tools;
 }
 
-bool McpToolRegistry::IsRouterTool(const std::string& tool_name) const
-{
-    return IsRouterToolName(tool_name);
-}
-
 bool McpToolRegistry::IsRouterTool(const std::string& tool_name, const std::string& router_tool_name) const
 {
     return NormalizeToolName(tool_name) == router_tool_name;
@@ -644,7 +655,10 @@ bool McpToolRegistry::IsDirectToolName(const std::string& tool_name) const
     std::string name = NormalizeToolName(tool_name);
 
     return (name == "load_media") ||
+           (name == "start_adam") ||
            (name == "get_media_info") ||
+           (name == "get_adam_status") ||
+           (name == "list_adam_media") ||
            (name == "debug_pause") ||
            (name == "debug_continue") ||
            (name == "debug_step_into") ||
@@ -657,7 +671,8 @@ bool McpToolRegistry::IsDirectToolName(const std::string& tool_name) const
            (name == "get_disassembly") ||
            (name == "set_breakpoint") ||
            (name == "get_screenshot") ||
-           (name == "controller_button");
+           (name == "controller_button") ||
+           (name == "adam_keyboard");
 }
 
 std::string McpToolRegistry::ToolCategoryForName(const std::string& tool_name) const
@@ -698,6 +713,10 @@ std::string McpToolRegistry::AliasesForTool(const std::string& tool_name) const
         aliases += " label labels names debug symbols";
     if (StringContains(name, "trace"))
         aliases += " log logger events cpu irq debug output";
+    if (StringContains(name, "profiler"))
+        aliases += " performance cycles timing hotspot function calls frame";
+    if (StringContains(name, "video_recording"))
+        aliases += " record movie clip capture avi mjpeg gameplay";
     if (StringContains(name, "controller"))
         aliases += " input joypad gamepad button macro tap press release";
     if (StringContains(name, "state") || StringContains(name, "rewind"))
@@ -706,6 +725,8 @@ std::string McpToolRegistry::AliasesForTool(const std::string& tool_name) const
         aliases += " cartridge rom mapper bank save nonvolatile";
     if (StringContains(name, "cdrom") || StringContains(name, "adpcm"))
         aliases += " cd disc track audio pcm";
+    if (StringContains(name, "adam"))
+        aliases += " computer adamnet mioc pcb dcb keyboard disk data pack printer firmware";
 
     return aliases;
 }

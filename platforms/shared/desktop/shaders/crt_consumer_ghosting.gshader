@@ -1,9 +1,10 @@
-; CRT Consumer + Ghosting preset for Geargrafx.
+; CRT Consumer + Ghosting preset for Gearcoleco.
 ; Includes a derivative crt-consumer pass from libretro slang-shaders.
 ; Original crt-consumer shader licensed GPL v2 or later.
 
 [Preset]
 Name=CRT Consumer + Ghosting
+Group=CRT Consumer
 Passes=2
 
 [Pass0]

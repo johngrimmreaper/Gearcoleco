@@ -28,7 +28,6 @@
 #include "rewind.h"
 
 static int seek_position = 0;
-static bool scrubbing = false;
 
 static void draw_transport_bar(void);
 static void draw_timeline(void);
@@ -42,6 +41,12 @@ void gui_debug_window_rewind(void)
     ImGui::Begin("Rewind", &config_debug.show_rewind, ImGuiWindowFlags_AlwaysAutoResize);
 
     ImGui::Dummy(ImVec2(280, 0));
+
+    size_t estimated_memory = rewind_get_estimated_memory_usage();
+    ImGui::Text("Estimated buffer: %.1f MiB (%d snapshots)", (double)estimated_memory / (1024.0 * 1024.0), rewind_get_capacity());
+
+    if (rewind_is_capacity_limited())
+        ImGui::TextColored(orange, "ADAM rewind is capped at 512 MiB.");
 
     draw_transport_bar();
     ImGui::Spacing();
@@ -73,7 +78,6 @@ static void draw_transport_bar(void)
                 emu_debug_continue();
             else
                 emu_resume();
-            scrubbing = false;
             seek_position = 0;
         }
     }
@@ -85,7 +89,6 @@ static void draw_transport_bar(void)
                 emu_debug_break();
             else
                 emu_pause();
-            scrubbing = false;
             seek_position = 0;
         }
     }
@@ -177,6 +180,5 @@ bool gui_debug_rewind_seek(int age)
         return false;
 
     seek_position = age;
-    scrubbing = true;
     return true;
 }

@@ -1,9 +1,10 @@
-; CRT Consumer preset for Geargrafx.
+; CRT Consumer preset for Gearcoleco.
 ; This is a derivative work based on crt-consumer from libretro slang-shaders.
 ; Original shader licensed GPL v2 or later.
 
 [Preset]
 Name=CRT Consumer
+Group=CRT Consumer
 Passes=1
 
 [Pass0]

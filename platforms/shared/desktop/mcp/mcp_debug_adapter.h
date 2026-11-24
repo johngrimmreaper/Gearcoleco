@@ -35,23 +35,12 @@ struct MemoryAreaInfo
     u32 size;
     u32 display_base;
     u8* data;
-};
-
-struct RegistersSnapshot
-{
-    u16 AF, BC, DE, HL;
-    u16 AF2, BC2, DE2, HL2;
-    u16 IX, IY, SP, PC, WZ;
-    u8 I, R;
-    bool IFF1, IFF2;
-    bool Halt;
-    int InterruptMode;
+    bool virtual_area;
 };
 
 struct BreakpointInfo
 {
     bool enabled;
-    int type;
     u16 address1;
     u16 address2;
     bool read;
@@ -71,9 +60,6 @@ struct DisasmLine
     int size;
     bool jump;
     u16 jump_address;
-    u8 jump_bank;
-    bool has_operand_address;
-    u16 operand_address;
     bool subroutine;
     int irq;
 };
@@ -104,13 +90,12 @@ public:
     std::vector<BreakpointInfo> ListBreakpoints();
 
     // Registers
-    RegistersSnapshot GetRegisters();
     void SetRegister(const std::string& name, u32 value);
 
     // Memory areas (matching debugger memory editor)
     std::vector<MemoryAreaInfo> ListMemoryAreas();
     std::vector<u8> ReadMemoryArea(int area, u32 offset, size_t size);
-    void WriteMemoryArea(int area, u32 offset, const std::vector<u8>& data);
+    size_t WriteMemoryArea(int area, u32 offset, const std::vector<u8>& data);
 
     // Disassembly (using existing disassembler records)
     std::vector<DisasmLine> GetDisassembly(u16 start_address, u16 end_address, int bank = -1, bool resolve_symbols = false);
@@ -122,15 +107,24 @@ public:
     json GetPSGStatus();
     json GetAY8910Status();
     json GetScreenshot();
+    json StartVideoRecording(const std::string& file_path, int scale, const std::string& aspect_ratio, const std::string& quality);
+    json StopVideoRecording();
     json ListSprites();
     json GetSpriteImage(int sprite_index);
 
     // Media and state management
     json GetMediaInfo();
+    json GetAdamStatus();
+    json GetAdamNetStatus();
+    json ListAdamMedia();
+    json GetAdamPrinterOutput();
+    json ClearAdamPrinterOutput();
     json ListRecentMedia();
     json StartLoadMedia(const std::string& file_path);
     bool IsMediaLoading() const;
     json FinishLoadMedia(const std::string& file_path);
+    json StartAdam();
+    json LoadBios(const std::string& file_path, GC_AdamFirmware firmware);
     json ListSaveStateSlots();
     json SelectSaveStateSlot(int slot);
     json SaveState();
@@ -144,6 +138,12 @@ public:
 
     // Controller input
     json ControllerButton(int player, const std::string& button, const std::string& action);
+    json AdamKeyboard(const std::string& key, const std::string& action);
+    json GetKeyMap();
+    json SetKeyBinding(const std::string& host, const std::string& keys);
+    json SetKeyMapping(bool enabled);
+    json HostKey(const std::string& key, const std::string& action);
+    json SetKeyMapperOpen(bool open);
     json GetInputState();
 
     // Disassembler operations
@@ -175,9 +175,8 @@ public:
     // Tracing
     json GetTraceLog(s64 start, int count);
     json SetTraceLog(const json& arguments);
-
-    // Core access
-    GearcolecoCore* GetCore() { return m_core; }
+    json SetProfiler(const std::string& action);
+    json GetProfilerData(const std::string& sort, int count, const std::string& filter);
 
 private:
     GearcolecoCore* m_core;

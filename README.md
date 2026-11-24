@@ -8,7 +8,7 @@
 [![License](https://img.shields.io/github/license/drhelius/Gearcoleco)](https://github.com/drhelius/Gearcoleco/blob/main/LICENSE)
 [![Twitter Follow](https://img.shields.io/twitter/follow/drhelius)](https://x.com/drhelius)
 
-Gearcoleco is a very accurate, cross-platform ColecoVision emulator written in C++ that runs on Windows, macOS, Linux, BSD and RetroArch, with an embedded MCP server for AI debugging and development.
+Gearcoleco is a very accurate, cross-platform ColecoVision and Coleco ADAM emulator written in C++ that runs on Windows, macOS, Linux, BSD and RetroArch, with an embedded MCP server for AI debugging and development.
 
 This is an open source project with its ongoing development made possible thanks to the support by these awesome [backers](backers.md). If you find it useful, please consider [sponsoring](https://github.com/sponsors/drhelius).
 
@@ -30,11 +30,11 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
     <tr>
       <td rowspan="2"><strong>Windows</strong></td>
       <td>Desktop x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-desktop-windows-x64.zip">Gearcoleco-1.6.13-desktop-windows-x64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.8.1/Gearcoleco-1.8.1-desktop-windows-x64.zip">Gearcoleco-1.8.1-desktop-windows-x64.zip</a></td>
     </tr>
     <tr>
       <td>Desktop ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-desktop-windows-arm64.zip">Gearcoleco-1.6.13-desktop-windows-arm64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.8.1/Gearcoleco-1.8.1-desktop-windows-arm64.zip">Gearcoleco-1.8.1-desktop-windows-arm64.zip</a></td>
     </tr>
     <tr>
       <td rowspan="3"><strong>macOS</strong></td>
@@ -43,14 +43,14 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
     </tr>
     <tr>
       <td>Desktop Apple Silicon</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-desktop-macos-arm64.zip">Gearcoleco-1.6.13-desktop-macos-arm64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.8.1/Gearcoleco-1.8.1-desktop-macos-arm64.zip">Gearcoleco-1.8.1-desktop-macos-arm64.zip</a></td>
     </tr>
     <tr>
       <td>Desktop Intel</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-desktop-macos-intel.zip">Gearcoleco-1.6.13-desktop-macos-intel.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.8.1/Gearcoleco-1.8.1-desktop-macos-intel.zip">Gearcoleco-1.8.1-desktop-macos-intel.zip</a></td>
     </tr>
     <tr>
-      <td rowspan="5"><strong>Linux</strong></td>
+      <td rowspan="6"><strong>Linux</strong></td>
       <td>Ubuntu PPA</td>
       <td><a href="https://github.com/drhelius/ppa-geardome">drhelius/ppa-geardome</a></td>
     </tr>
@@ -59,16 +59,20 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
       <td><a href="https://github.com/drhelius/rpm-geardome">drhelius/rpm-geardome</a></td>
     </tr>
     <tr>
-      <td>Desktop Ubuntu 24.04 x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-desktop-ubuntu24.04-x64.zip">Gearcoleco-1.6.13-desktop-ubuntu24.04-x64.zip</a></td>
+      <td>Desktop Ubuntu 26.04 x64</td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.8.1/Gearcoleco-1.8.1-desktop-ubuntu26.04-x64.zip">Gearcoleco-1.8.1-desktop-ubuntu26.04-x64.zip</a></td>
     </tr>
     <tr>
-      <td>Desktop Ubuntu 22.04 x64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-desktop-ubuntu22.04-x64.zip">Gearcoleco-1.6.13-desktop-ubuntu22.04-x64.zip</a></td>
+      <td>Desktop Ubuntu 26.04 ARM64</td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.8.1/Gearcoleco-1.8.1-desktop-ubuntu26.04-arm64.zip">Gearcoleco-1.8.1-desktop-ubuntu26.04-arm64.zip</a></td>
+    </tr>
+    <tr>
+      <td>Desktop Ubuntu 24.04 x64</td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.8.1/Gearcoleco-1.8.1-desktop-ubuntu24.04-x64.zip">Gearcoleco-1.8.1-desktop-ubuntu24.04-x64.zip</a></td>
     </tr>
     <tr>
       <td>Desktop Ubuntu 24.04 ARM64</td>
-      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.6.13/Gearcoleco-1.6.13-desktop-ubuntu24.04-arm64.zip">Gearcoleco-1.6.13-desktop-ubuntu24.04-arm64.zip</a></td>
+      <td><a href="https://github.com/drhelius/Gearcoleco/releases/download/1.8.1/Gearcoleco-1.8.1-desktop-ubuntu24.04-arm64.zip">Gearcoleco-1.8.1-desktop-ubuntu24.04-arm64.zip</a></td>
     </tr>
     <tr>
       <td><strong>MCPB</strong></td>
@@ -97,6 +101,8 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
 
 - Very accurate Z80 core, TMS9918A VDP, SN76489 PSG and AY-3-8910 SGM emulation.
 - Support for ColecoVision Super Game Module (SGM) and MegaCart ROMs.
+- Coleco ADAM computer and cartridge boot modes, full keyboard, ADAMnet, printer, Digital Data Pack and floppy support.
+- In-game ADAM keyboard mapper to bind host keys per game.
 - Optional F18A v1.9 emulation.
 - Support for Super Action Controller (SAC), Wheel Controller and Roller Controller.
 - Save states with preview and rewind support.
@@ -106,22 +112,82 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
 - Supported platforms (standalone): Windows, Linux, BSD and macOS.
 - Supported platforms (libretro): Windows, Linux, macOS, Raspberry Pi, Android, iOS, tvOS, webOS, PlayStation Vita, PlayStation 3, Nintendo 3DS, Nintendo GameCube, Nintendo Wii, Nintendo WiiU, Nintendo Switch, Emscripten, Classic Mini systems (NES, SNES, C64, ...), OpenDingux, RetroFW and QNX.
 - Full debugger with just-in-time disassembler, CPU breakpoints, memory access breakpoints, code navigation (goto address, JP JR and CALL double clicking), debug symbols, automatic labels, memory editor, trace logger, IO inspector and VRAM viewer including registers, tiles, sprites and backgrounds.
-- MCP server for AI-assisted debugging with GitHub Copilot, Claude, Codex and similar, exposing tools for execution control, memory inspection, hardware status, rewind and more.
+- MCP server for AI-assisted debugging with Claude Code, Codex and similar, exposing tools for execution control, memory inspection, hardware status, rewind and more.
 - Windows, Linux and macOS *Portable Mode*.
 - [Programmable Shader Chain](platforms/shared/desktop/shaders/README.md).
-- ROM loading from the command line by adding the ROM path as an argument.
-- ROM loading using drag & drop.
+- Content loading from the command line by adding the cartridge, ADAM media or playlist path as an argument.
+- Content loading using drag & drop.
 - Support for modern game controllers through [gamecontrollerdb.txt](https://github.com/mdqinc/SDL_GameControllerDB) file located in the same directory as the application binary.
 
 ## Tips
 
 ### Basic Usage
-- **BIOS**: Gearcoleco needs a BIOS to run. It is possible to load any BIOS but the original one with md5 `2c66f5911e5b42b8ebe113403548eee7` is recommended.
-- **Spinners**: When using any kind of spinner it is useful to capture the mouse by pressing `F12`. It is also recommended to disable spinners for software that don't use them.
-- **Rewind**: Hold the configured rewind hotkey (`Backspace` by default) or a mapped gamepad shortcut to step backwards through recent gameplay.
+
+- **BIOS and ADAM Firmware**: Firmware is not included. Select the ColecoVision BIOS (OS-7) under **Emulator > BIOS**; the original BIOS is recommended (CRC32 `3aa93ef3`; filenames `colecovision.rom`, `coleco.rom` or `os7.u2`). ADAM additionally needs **ADAM > EOS ROM** (`eos.rom`, 8192 bytes, common CRC32 `05a37a34`) and **ADAM > SmartWriter ROM** (`writer.rom`, `wp.rom` or `wp_r80.rom`, 32768 bytes, common CRC32 `58d86a2a`).
+- **ADAM Startup and Media**: Insert images through the **ADAM** menu's disk or data pack submenus, then select **Power On**. Supported formats are 256 KiB `.ddp`, 160/320 KiB `.dsk`, ZIP archives containing one valid ADAM image, and `.m3u` playlists containing images of the same type. Each drive has its own recent images, playlist and write protection controls. Insert/eject affects only that drive; dropped images use an available matching drive or prompt for a destination. **Gearcoleco > Open ROM...** starts ColecoVision cartridges.
+- **ADAM Power and Saves**: **Power Off** saves modified media and keeps it inserted. Firmware changes apply at the next **Power On**; **Computer Reset** retains the current firmware and mounted media. Changes are stored as complete images under **Save Files**, leaving source files untouched. Drive menus also provide **Save Changes** and **Save As**; a failed save keeps the modified image mounted.
+- **ADAM Input**: Type directly into ADAM; in debug mode, focus **Output** to type or a debugger tool to use its shortcuts. Configure special keys under **ADAM > Keyboard** (see [defaults below](#desktop-adam-keyboard)) and change them per game with the [keyboard mapper](#adam-keyboard-mapper); `Alt+Enter` toggles fullscreen. **ADAM > Controller 1 / Controller 2** selects gamepad (default), keyboard or no hand controller per port. Bindings come from **Input > Gamepads** or **Input > Keyboard Configuration**; keys mapped to a hand controller do not type into ADAM. ADAM controller choices are saved separately from ColecoVision settings.
+- **Spinners**: The mouse drives them while the pointer is over the screen. For free movement, press `Ctrl+F10` or go fullscreen to enter **Game Focus**, which locks the mouse in the window; `Ctrl+F10` leaves it. Disable spinners for software that does not use them.
+- **Hotkeys**: `Ctrl+F10` Game Focus, `Alt+Enter` fullscreen, `Ctrl+F9` quit (`Cmd+Q` on macOS), `Ctrl+Shift+S` / `Ctrl+Shift+L` save and load state, `Ctrl+Shift+R` reset, `Ctrl+Shift+P` pause. On macOS, `Cmd` replaces `Ctrl` and `Option` replaces `Alt` in all of them. In Game Focus every hotkey is off except `Ctrl+F10`, `Alt+Enter`, `Ctrl+F1` and `Ctrl+F2`. Change them in **Emulator > Hotkeys**, where **Reset to Defaults** brings these back.
+- **Rewind**: Hold the configured rewind hotkey (`Ctrl+Shift+B` by default) or a mapped gamepad shortcut to step backwards through recent gameplay.
 - **Overscan**: For a precise representation of the original image, select **Overscan** `Top+Bottom` and **Aspect Ratio** `Standard (4:3 DAR)` in the **Video** menu.
 - **Mouse Cursor**: Automatically hides when hovering over the main output window or when Main Menu is disabled.
 - **Portable Mode**: Run with `--portable`, or create an empty file named `portable.ini` in the same directory as the application binary. On macOS, place the file next to the `.app` bundle.
+
+### Desktop ADAM Keyboard
+
+Normal letters, digits, punctuation, Return, Escape, Backspace, Tab, Shift, Control, Caps Lock and arrow keys map directly. The dedicated ADAM keys use these defaults:
+
+| Host key | ADAM key |
+|---|---|
+| F1-F6 | SmartKey I-VI |
+| F7 / F8 | Undo / Wild Card |
+| Home / Insert / Delete | ADAM Home / Insert / Delete |
+| Page Up / Page Down | Move-Copy / Store-Fetch |
+| End | Clear |
+| Print Screen | Print |
+
+Saved keyboard mappings are preserved. Use **ADAM > Keyboard > Restore Defaults** to adopt this layout in an existing configuration.
+
+Keys type into ADAM while the window has focus. Hotkeys use `Ctrl+Shift` or `Ctrl` with an F-key, so SmartKeys and editing keys reach the emulated keyboard. In Game Focus only `Ctrl+F10`, `Alt+Enter`, `Ctrl+F1` and `Ctrl+F2` stay active. Leaving the window releases every held ADAM key and leaves Game Focus.
+
+On Windows and Linux, `Ctrl+F1` and `Ctrl+F2` belong to the [keyboard mapper](#adam-keyboard-mapper), so software that needs Control with SmartKey I or II needs them moved in **Emulator > Hotkeys**.
+
+ADAM keyboard input follows focus automatically. In normal use, type directly; in debug mode, focus Output to type into ADAM or focus a debugger tool to use its shortcuts. `Alt+Enter` toggles fullscreen.
+
+### ADAM Keyboard Mapper
+
+Press `Ctrl+F1` (`Cmd+F1` on macOS), or use **ADAM > Keyboard > Keyboard Mapper...**, to stop ADAM and show its keyboard:
+
+- Click an ADAM key, then press the host key that should drive it, on its own. It stays selected for more host keys; click it again to deselect it.
+- Each ADAM key lists the host keys that drive it, built-in ones first. Click the **x** on one to remove it. Removing a host key's last user binding gives it back its default mapping, while removing a built-in one leaves the host key unbound. Right click the ADAM key to remove all but the built-in ones.
+- Red keys are ones no host key reaches.
+- **Reset All**, clicked twice, drops the game's changes.
+- Press the same hotkey again, or click **Close**, to go back.
+
+`Ctrl+F2` (`Cmd+F2` on macOS), or **ADAM > Keyboard > Key Mapping**, turns the game's changes off and on, for instance to type text in a game whose letter keys were moved. Every game starts with them on. Both hotkeys can be changed in **Emulator > Hotkeys**, and the mapper can also have a gamepad shortcut.
+
+The mapper's changes sit on top of the **ADAM > Keyboard** bindings and are kept for that game only, in a `.keys` file named after the content (`ADAM.keys` with nothing loaded) in the **Save Files** folder, written when the mapper closes. The file can be edited by hand. Host keys without a line keep their usual job:
+
+```ini
+[keys]
+w = up
+s = down
+f9 = control + smart_1
+grave = none
+```
+
+- **Host keys**: `a`-`z`, `0`-`9`, `f1`-`f24`, `return`, `escape`, `backspace`, `tab`, `space`, `minus`, `equals`, `left_bracket`, `right_bracket`, `backslash`, `non_us_hash`, `semicolon`, `apostrophe`, `grave`, `comma`, `period`, `slash`, `non_us_backslash`, `caps_lock`, `print_screen`, `scroll_lock`, `pause`, `insert`, `home`, `page_up`, `delete`, `end`, `page_down`, `up`, `down`, `left`, `right`, `num_lock`, `kp_0`-`kp_9`, `kp_00`, `kp_000`, `kp_divide`, `kp_multiply`, `kp_minus`, `kp_plus`, `kp_enter`, `kp_period`, `kp_equals`, `kp_comma`, `menu`, `help`, `sysreq`, `international1`-`international5`, `lang1`-`lang5`, `left_ctrl`, `left_shift`, `left_alt`, `left_gui`, `right_ctrl`, `right_shift`, `right_alt`, `right_gui`.
+- **ADAM keys**: `a`-`z`, `0`-`9`, `smart_1`-`smart_6`, `space`, `minus`, `plus`, `caret`, `semicolon`, `quote`, `open_bracket`, `close_bracket`, `backslash`, `comma`, `period`, `slash`, `return`, `escape`, `backspace`, `tab`, `home`, `wild_card`, `undo`, `move`, `store`, `insert`, `print`, `clear`, `delete`, `up`, `down`, `left`, `right`, `shift`, `control`, `lock`.
+- A host key takes up to four ADAM keys joined with `+`, pressed in that order, such as `control + smart_1`, or `none` to do nothing.
+
+### ADAM in Libretro
+
+- **Startup**: Place OS-7, EOS and SmartWriter in the frontend system directory or its `gearcoleco` subdirectory using the [firmware names above](#basic-usage). ADAM starts automatically for `.ddp`, `.dsk`, ADAM `.zip`, `.m3u` or no content; without bootable media it opens SmartWriter. Cartridges use ColecoVision unless **Cartridge Hardware** is set to ADAM.
+- **Media and Saves**: Media is write protected by default. Enable `Save-directory working copy` to save complete modified images in the frontend save directory, leaving source files untouched. **ADAM Disk Control Drive** selects Disk 1/2 or Data Pack 1/2; **Loaded media** (default) targets the primary content drive. Each drive has its own image list. Swap through the frontend's eject, select and close sequence; other drives stay mounted.
+- **Multiple Images**: The optional **ADAM** subsystem (`adam`) loads up to five slots before boot: **Cartridge, Disk 1, Disk 2, Data Pack 1, Data Pack 2**, in that order. All slots are optional and each drive supports playlists. Update older three-slot configurations to this layout; use normal content loading for a single image or playlist.
+- **Keyboard**: Bindings start from the [desktop defaults](#desktop-adam-keyboard), including Escape for Escape/WP and Shift/Control as modifiers. `Ctrl+F1` (`Cmd+F1` on macOS) opens the [keyboard mapper](#adam-keyboard-mapper), clicked with the mouse or a touch screen, and `Ctrl+F2` (`Cmd+F2`) turns its changes off and on. They are kept in `<content>.keys` in the save directory (`ADAM.keys` without content). In RetroArch, set **Settings > Input > Auto Enable 'Game Focus' Mode** to **Detect**, or toggle Game Focus with Scroll Lock before typing or using these hotkeys; the core reminds you when ADAM content loads. Turn it off to use RetroArch shortcuts. Without Scroll Lock, assign **Game Focus Toggle** to F10; F9-F12 and Scroll Lock are unmapped in ADAM.
+- **Reset**: Frontend Reset keeps the current boot mode. **ADAM Computer Reset** boots from mounted media without ejecting it; if the option does not return to Idle automatically, select Idle before requesting another reset.
 
 ### Debugging Features
 - **Docking Windows**: In debug mode, you can dock windows together by pressing SHIFT and dragging a window onto another.
@@ -132,15 +198,16 @@ Don't hesitate to report bugs or ask for new features by [opening an issue](http
 
 ### Command Line Usage
 ```
-gearcoleco [options] [rom_file] [symbol_file]
+gearcoleco [options] [content_file] [symbol_file]
 
 Arguments:
-  [rom_file]                  ROM file: accepts ROMs (.col, .cv, .rom, .bin) or ZIP (.zip)
+  [content_file]              Cartridge or ADAM media (.col, .cv, .rom, .bin, .ddp, .dsk, .zip, .m3u)
   [symbol_file]               Optional symbol file for debugging
 
 Options:
   -f, --fullscreen            Start in fullscreen mode
   -w, --windowed              Start in windowed mode with menu visible
+      --load-state SLOT       Load save state slot 1-5, or a state file, once the media is loaded
       --mcp-stdio             Auto-start MCP server with stdio transport
       --mcp-http              Auto-start MCP server with HTTP transport
       --mcp-router            Enable compact MCP tool routing
@@ -154,7 +221,7 @@ Options:
 
 ### MCP Server
 
-Gearcoleco includes a [Model Context Protocol](https://modelcontextprotocol.io/introduction) (MCP) server that enables AI-assisted debugging through AI agents like GitHub Copilot, Claude, Codex and similar. The server provides tools for execution control, memory inspection, breakpoints, disassembly, hardware status, and more. STDIO and HTTP transports are supported, with STDIO preferred.
+Gearcoleco includes a [Model Context Protocol](https://modelcontextprotocol.io/introduction) (MCP) server that enables AI-assisted debugging through AI agents like Claude Code, Codex and similar. The server provides tools for execution control, memory inspection, breakpoints, disassembly, hardware status, and more. STDIO and HTTP transports are supported, with STDIO preferred.
 
 For complete setup instructions and tool documentation, see [MCP_README.md](MCP_README.md).
 
@@ -192,15 +259,15 @@ make dist
 
 - Ubuntu / Debian / Raspberry Pi (Raspbian):
 
-If you are using Ubuntu 25.04 or later, you can install SDL3 directly. Use the following commands to build:
+If you are using Ubuntu 26.04, you can install SDL3 directly. Use the following commands to build:
 
 ``` shell
-sudo apt install build-essential libsdl3-dev
+sudo apt install build-essential pkg-config libsdl3-dev libgl-dev
 cd platforms/linux
 make
 ```
 
-For older Ubuntu versions (22.04, 24.04), you need to build SDL3 from source first. Use the following commands to build both SDL3 and Gearcoleco:
+For Ubuntu 24.04, you need to build SDL3 from source first. Use the following commands to build both SDL3 and Gearcoleco:
 
 ``` shell
 sudo apt install build-essential cmake git curl jq pkg-config \

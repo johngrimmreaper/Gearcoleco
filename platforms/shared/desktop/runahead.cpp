@@ -101,8 +101,10 @@ void runahead_run(int frames, u8* frame_buffer, s16* sample_buffer, int* sample_
     // authoritative state is unrecoverable, so keep the (valid) speculative
     // state as the new timeline and disable run-ahead. Emulation continues
     // without interruption.
-    if (!core->LoadState(runahead_buffer, saved_size))
+    bool restored = core->LoadState(runahead_buffer, saved_size);
+    if (!restored)
     {
+        emu_debug_state_restored();
         Log("Run-ahead: failed to restore state, disabling run-ahead");
         config_emulator.runahead = 0;
     }

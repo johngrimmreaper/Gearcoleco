@@ -1,3 +1,11 @@
+gearcoleco (1.8.1-1) UNRELEASED; urgency=medium
+
+  * New upstream release 1.8.1.
+  * Install upstream icons at all supported resolutions.
+  * Upstream bug fixes and improvements.
+
+ -- Reaper <JohnGrimmReaper@disroot.org>  Tue, 24 Nov 2026 02:31:52 +0000
+
 gearcoleco (1.6.13-1) UNRELEASED; urgency=medium
 
   * New iOS App (in development)

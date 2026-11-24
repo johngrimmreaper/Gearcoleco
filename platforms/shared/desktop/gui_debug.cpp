@@ -29,13 +29,16 @@
 #include "gui_debug_rewind.h"
 #include "gui_debug_psg.h"
 #include "gui_debug_ay8910.h"
+#include "gui_debug_adam.h"
 #include "gui_debug_tms9918.h"
 #include "gui_debug_f18a.h"
 #include "gui_debug_trace_logger.h"
+#include "gui_debug_profiler.h"
 #include "emu.h"
 #include "config.h"
 
-static const char* GCDEBUG_MAGIC = "GCDEBUG1";
+static const char* GCDEBUG_MAGIC_V1 = "GCDEBUG1";
+static const char* GCDEBUG_MAGIC = "GCDEBUG2";
 static const int GCDEBUG_MAGIC_LEN = 8;
 static const int GCDEBUG_MAX_RECORDS = 0x10000;
 
@@ -64,9 +67,10 @@ void gui_debug_destroy(void)
 
 void gui_debug_reset(void)
 {
-    gui_debug_trace_logger_reset();
+    gui_debug_trace_logger_reset("media_change");
     gui_debug_disassembler_reset();
     gui_debug_memory_reset();
+    gui_debug_profiler_reset();
     gui_debug_reset_breakpoints();
     gui_debug_reset_symbols();
 }
@@ -79,11 +83,21 @@ void gui_debug_update(void)
 void gui_debug_windows(void)
 {
     gui_debug_update();
+    bool adam_running = !emu_is_empty() && (emu_get_machine() == GC_MACHINE_ADAM);
     emu_get_core()->GetAudio()->EnablePSGDebug(config_debug.debug && config_debug.show_psg);
-    emu_get_core()->GetAudio()->EnableAY8910Debug(config_debug.debug && config_debug.show_ay8910);
+    gui_debug_profiler_update();
+    emu_get_core()->GetAudio()->EnableAY8910Debug(config_debug.debug &&
+        config_debug.show_ay8910 && !adam_running);
 
     if (config_debug.debug)
     {
+        GC_AdamDebugState adam_state;
+        bool have_adam_state = false;
+        if (adam_running && (config_debug.show_adam_system || config_debug.show_adam_net))
+        {
+            have_adam_state = emu_get_core()->GetAdamDebugState(&adam_state);
+        }
+
         if (config_debug.show_processor)
             gui_debug_window_processor();
         if (config_debug.show_memory)
@@ -96,10 +110,16 @@ void gui_debug_windows(void)
             gui_debug_window_breakpoints();
         if (config_debug.show_symbols)
             gui_debug_window_symbols();
+        if (config_debug.show_profiler)
+            gui_debug_window_profiler();
         if (config_debug.show_psg)
             gui_debug_window_psg();
-        if (config_debug.show_ay8910)
+        if (config_debug.show_ay8910 && !adam_running)
             gui_debug_window_ay8910();
+        if (have_adam_state && config_debug.show_adam_system)
+            gui_debug_window_adam_system(&adam_state);
+        if (have_adam_state && config_debug.show_adam_net)
+            gui_debug_window_adam_net(&adam_state);
         if (emu_get_core()->GetVideoChip() == GC_VIDEO_CHIP_F18A)
         {
             if (config_debug.show_f18a_nametables)
@@ -139,13 +159,13 @@ void gui_debug_windows(void)
     }
 }
 
-void gui_debug_save_settings(const char* file_path)
+bool gui_debug_save_settings(const char* file_path)
 {
     std::ofstream file(file_path, std::ios::binary);
     if (!file.is_open())
     {
         Log("Failed to open debug settings file for writing: %s", file_path);
-        return;
+        return false;
     }
 
     file.write(GCDEBUG_MAGIC, GCDEBUG_MAGIC_LEN);
@@ -190,23 +210,30 @@ void gui_debug_save_settings(const char* file_path)
     file.close();
 
     Log("Debug settings saved to: %s", file_path);
+    return true;
 }
 
-void gui_debug_load_settings(const char* file_path)
+bool gui_debug_load_settings(const char* file_path)
 {
     std::ifstream file(file_path, std::ios::binary);
     if (!file.is_open())
     {
         Log("Failed to open debug settings file for reading: %s", file_path);
-        return;
+        return false;
     }
 
     char magic[8] = {};
-    if (!read_settings_data(file, magic, GCDEBUG_MAGIC_LEN) ||
-        memcmp(magic, GCDEBUG_MAGIC, GCDEBUG_MAGIC_LEN) != 0)
+    if (!read_settings_data(file, magic, GCDEBUG_MAGIC_LEN))
     {
         Log("Invalid debug settings file: %s", file_path);
-        return;
+        return false;
+    }
+
+    bool legacy_v1 = memcmp(magic, GCDEBUG_MAGIC_V1, GCDEBUG_MAGIC_LEN) == 0;
+    if (!legacy_v1 && (memcmp(magic, GCDEBUG_MAGIC, GCDEBUG_MAGIC_LEN) != 0))
+    {
+        Log("Invalid debug settings file: %s", file_path);
+        return false;
     }
 
     GearcolecoCore* core = emu_get_core();
@@ -220,7 +247,7 @@ void gui_debug_load_settings(const char* file_path)
     if (!read_settings_count(file, bp_count, breakpoint_size))
     {
         Log("Invalid debug settings file: %s", file_path);
-        return;
+        return false;
     }
 
     std::vector<Processor::GC_Breakpoint> breakpoints;
@@ -238,7 +265,7 @@ void gui_debug_load_settings(const char* file_path)
             !read_settings_bool(file, bp.range))
         {
             Log("Invalid debug settings file: %s", file_path);
-            return;
+            return false;
         }
         breakpoints.push_back(bp);
     }
@@ -247,7 +274,7 @@ void gui_debug_load_settings(const char* file_path)
     if (!read_settings_bool(file, irq_breakpoints))
     {
         Log("Invalid debug settings file: %s", file_path);
-        return;
+        return false;
     }
 
     struct DasmBookmark { u16 address; char name[32]; };
@@ -257,7 +284,7 @@ void gui_debug_load_settings(const char* file_path)
     if (!read_settings_count(file, bookmark_count, bookmark_size))
     {
         Log("Invalid debug settings file: %s", file_path);
-        return;
+        return false;
     }
 
     std::vector<DasmBookmark> bookmarks;
@@ -269,16 +296,16 @@ void gui_debug_load_settings(const char* file_path)
             !read_settings_data(file, item.name, sizeof(item.name)))
         {
             Log("Invalid debug settings file: %s", file_path);
-            return;
+            return false;
         }
         item.name[sizeof(item.name) - 1] = 0;
         bookmarks.push_back(item);
     }
 
-    if (!gui_debug_memory_load_settings(file))
+    if (!gui_debug_memory_load_settings(file, legacy_v1 ? 5 : MEMORY_EDITOR_MAX))
     {
         Log("Invalid debug settings file: %s", file_path);
-        return;
+        return false;
     }
 
     processor->GetBreakpoints()->swap(breakpoints);
@@ -291,18 +318,16 @@ void gui_debug_load_settings(const char* file_path)
     file.close();
 
     Log("Debug settings loaded from: %s", file_path);
+    return true;
 }
 
 static std::string get_auto_debug_settings_path(void)
 {
-    GearcolecoCore* core = emu_get_core();
-    if (!core || !core->GetCartridge() || strlen(core->GetCartridge()->GetFileName()) == 0)
+    char identity[1200];
+    if (!emu_get_debug_identity(identity, sizeof(identity)))
         return "";
 
-    std::string filename = core->GetCartridge()->GetFileName();
-    std::string::size_type dot = filename.find_last_of('.');
-    if (dot != std::string::npos)
-        filename = filename.substr(0, dot);
+    std::string filename = identity;
     filename += ".gcdebug";
 
     std::string path = config_root_path;

@@ -97,8 +97,6 @@ typedef int32_t s32;
 typedef uint64_t u64;
 typedef int64_t s64;
 
-typedef void (*RamChangedCallback) (void);
-
 #define FLAG_CARRY 0x01
 #define FLAG_NEGATIVE 0x02
 #define FLAG_PARITY 0x04
@@ -124,17 +122,19 @@ typedef void (*RamChangedCallback) (void);
 #define GC_RESOLUTION_SMS_OVERSCAN_H_284_R 14
 #define GC_RESOLUTION_OVERSCAN_V 24
 #define GC_RESOLUTION_OVERSCAN_V_PAL 48
+#define GC_RESOLUTION_TEXT_WIDTH 240
+#define GC_RESOLUTION_TEXT_BORDER_L 6
 #define GC_VIDEO_MAX_HEIGHT GC_RESOLUTION_HEIGHT_WITH_OVERSCAN
 
 #define GC_CYCLES_PER_LINE 228
+#define GC_PIXELS_PER_LINE 342
 
 #define GC_MASTER_CLOCK_NTSC 3579545
 #define GC_LINES_PER_FRAME_NTSC 262
 #define GC_FRAMES_PER_SECOND_NTSC 60
 
-#define GC_MASTER_CLOCK_PAL 3546893
+#define GC_MASTER_CLOCK_PAL 3579545
 #define GC_LINES_PER_FRAME_PAL 313
-#define GC_FRAMES_PER_SECOND_PAL 50
 
 #define GC_AUDIO_SAMPLE_RATE 44100
 #define GC_AUDIO_BUFFER_SIZE 2048
@@ -142,10 +142,11 @@ typedef void (*RamChangedCallback) (void);
 #define GC_AUDIO_QUEUE_SIZE 1792
 
 #define GC_SAVESTATE_MAGIC 0x09200902
-#define GC_SAVESTATE_VERSION 106
+#define GC_SAVESTATE_VERSION 109
 #define GC_SAVESTATE_MIN_VERSION 100
 #define GC_SAVESTATE_VERSION_V1 1
-#define GC_LIBRETRO_SAVESTATE_SIZE 0x3A000
+#define GC_LIBRETRO_SAVESTATE_SIZE_COLECOVISION 0x3A000
+#define GC_LIBRETRO_SAVESTATE_SIZE_ADAM 0x180000
 
 struct GC_SaveState_Header
 {
@@ -199,6 +200,249 @@ enum GC_VideoChip
     GC_VIDEO_CHIP_F18A
 };
 
+enum GC_Machine
+{
+    GC_MACHINE_AUTO = 0,
+    GC_MACHINE_COLECOVISION,
+    GC_MACHINE_ADAM
+};
+
+enum GC_ContentType
+{
+    GC_CONTENT_NONE = 0,
+    GC_CONTENT_CARTRIDGE,
+    GC_CONTENT_ADAM_DATA_PACK,
+    GC_CONTENT_ADAM_DISK
+};
+
+enum GC_AdamBootMode
+{
+    GC_ADAM_BOOT_COMPUTER = 0,
+    GC_ADAM_BOOT_CARTRIDGE
+};
+
+enum GC_AdamFirmware
+{
+    GC_ADAM_FIRMWARE_OS7 = 0,
+    GC_ADAM_FIRMWARE_EOS,
+    GC_ADAM_FIRMWARE_SMARTWRITER,
+    GC_ADAM_FIRMWARE_COUNT
+};
+
+enum GC_AdamMediaType
+{
+    GC_ADAM_MEDIA_NONE = 0,
+    GC_ADAM_MEDIA_DATA_PACK,
+    GC_ADAM_MEDIA_DISK
+};
+
+enum GC_AdamMediaSlot
+{
+    GC_ADAM_MEDIA_DISK_1 = 0,
+    GC_ADAM_MEDIA_DISK_2,
+    GC_ADAM_MEDIA_DATA_PACK_1,
+    GC_ADAM_MEDIA_DATA_PACK_2,
+    GC_ADAM_MEDIA_SLOT_COUNT
+};
+
+enum GC_AdamMediaError
+{
+    GC_ADAM_MEDIA_ERROR_NONE = 0,
+    GC_ADAM_MEDIA_ERROR_INVALID_ARGUMENT,
+    GC_ADAM_MEDIA_ERROR_INVALID_SIZE,
+    GC_ADAM_MEDIA_ERROR_NO_MEDIA,
+    GC_ADAM_MEDIA_ERROR_WRITE_PROTECTED,
+    GC_ADAM_MEDIA_ERROR_OUT_OF_RANGE,
+    GC_ADAM_MEDIA_ERROR_CHANGED
+};
+
+enum GC_AdamKey
+{
+    GC_ADAM_KEY_A = 0,
+    GC_ADAM_KEY_B,
+    GC_ADAM_KEY_C,
+    GC_ADAM_KEY_D,
+    GC_ADAM_KEY_E,
+    GC_ADAM_KEY_F,
+    GC_ADAM_KEY_G,
+    GC_ADAM_KEY_H,
+    GC_ADAM_KEY_I,
+    GC_ADAM_KEY_J,
+    GC_ADAM_KEY_K,
+    GC_ADAM_KEY_L,
+    GC_ADAM_KEY_M,
+    GC_ADAM_KEY_N,
+    GC_ADAM_KEY_O,
+    GC_ADAM_KEY_P,
+    GC_ADAM_KEY_Q,
+    GC_ADAM_KEY_R,
+    GC_ADAM_KEY_S,
+    GC_ADAM_KEY_T,
+    GC_ADAM_KEY_U,
+    GC_ADAM_KEY_V,
+    GC_ADAM_KEY_W,
+    GC_ADAM_KEY_X,
+    GC_ADAM_KEY_Y,
+    GC_ADAM_KEY_Z,
+    GC_ADAM_KEY_0,
+    GC_ADAM_KEY_1,
+    GC_ADAM_KEY_2,
+    GC_ADAM_KEY_3,
+    GC_ADAM_KEY_4,
+    GC_ADAM_KEY_5,
+    GC_ADAM_KEY_6,
+    GC_ADAM_KEY_7,
+    GC_ADAM_KEY_8,
+    GC_ADAM_KEY_9,
+    GC_ADAM_KEY_SPACE,
+    GC_ADAM_KEY_MINUS,
+    GC_ADAM_KEY_PLUS,
+    GC_ADAM_KEY_CARET,
+    GC_ADAM_KEY_SEMICOLON,
+    GC_ADAM_KEY_QUOTE,
+    GC_ADAM_KEY_OPEN_BRACKET,
+    GC_ADAM_KEY_CLOSE_BRACKET,
+    GC_ADAM_KEY_BACKSLASH,
+    GC_ADAM_KEY_COMMA,
+    GC_ADAM_KEY_PERIOD,
+    GC_ADAM_KEY_SLASH,
+    GC_ADAM_KEY_RETURN,
+    GC_ADAM_KEY_ESCAPE,
+    GC_ADAM_KEY_BACKSPACE,
+    GC_ADAM_KEY_TAB,
+    GC_ADAM_KEY_HOME,
+    GC_ADAM_KEY_SMART_1,
+    GC_ADAM_KEY_SMART_2,
+    GC_ADAM_KEY_SMART_3,
+    GC_ADAM_KEY_SMART_4,
+    GC_ADAM_KEY_SMART_5,
+    GC_ADAM_KEY_SMART_6,
+    GC_ADAM_KEY_WILD_CARD,
+    GC_ADAM_KEY_UNDO,
+    GC_ADAM_KEY_MOVE,
+    GC_ADAM_KEY_STORE,
+    GC_ADAM_KEY_INSERT,
+    GC_ADAM_KEY_PRINT,
+    GC_ADAM_KEY_CLEAR,
+    GC_ADAM_KEY_DELETE,
+    GC_ADAM_KEY_UP,
+    GC_ADAM_KEY_RIGHT,
+    GC_ADAM_KEY_DOWN,
+    GC_ADAM_KEY_LEFT,
+    GC_ADAM_KEY_SHIFT,
+    GC_ADAM_KEY_CONTROL,
+    GC_ADAM_KEY_LOCK,
+    GC_ADAM_KEY_COUNT
+};
+
+enum GC_AdamNetControllerState
+{
+    GC_ADAMNET_CONTROLLER_INITIALIZING = 0,
+    GC_ADAMNET_CONTROLLER_IDLE,
+    GC_ADAMNET_CONTROLLER_BUSY
+};
+
+enum GC_AdamDebugConstants
+{
+    GC_ADAM_DEBUG_PAGE_COUNT = 8,
+    GC_ADAM_DEBUG_DCB_COUNT = 15,
+    GC_ADAM_DEBUG_PRINTER_SIZE = 4096
+};
+
+struct GC_AdamDebugFirmwareState
+{
+    bool loaded;
+    int size;
+    u32 crc;
+    bool known;
+};
+
+struct GC_AdamDebugMemoryPage
+{
+    u16 start;
+    u16 end;
+    int read_source;
+    u32 read_offset;
+    int write_source;
+    u32 write_offset;
+    int cartridge_bank;
+    bool writable;
+};
+
+struct GC_AdamDebugDCB
+{
+    u8 command_status;
+    u8 device;
+    u16 buffer;
+    u16 length;
+    u32 block;
+    u16 retry;
+    u16 max_length;
+    u8 device_type;
+    u8 node_status;
+};
+
+struct GC_AdamDebugMediaState
+{
+    bool inserted;
+    int type;
+    u32 size;
+    u32 block_count;
+    u32 position;
+    u32 generation;
+    bool cache_valid;
+    u32 cached_block;
+    u32 cached_generation;
+    bool write_protected;
+    bool dirty;
+    u32 base_crc;
+};
+
+struct GC_AdamDebugState
+{
+    bool valid;
+    int content_type;
+    int boot_mode;
+    u64 master_clock_cycles;
+    GC_AdamDebugFirmwareState firmware[GC_ADAM_FIRMWARE_COUNT];
+    u8 mioc;
+    u8 control;
+    bool adamnet_reset;
+    bool eos_enabled;
+    GC_AdamDebugMemoryPage pages[GC_ADAM_DEBUG_PAGE_COUNT];
+    u32 mapping_generation;
+    int controller_state;
+    u16 pcb_address;
+    u8 pcb_command_status;
+    u8 configured_dcb_count;
+    u8 next_scan_index;
+    int cycles_until_event;
+    bool transfer_active;
+    bool transfer_pcb;
+    u8 transfer_dcb;
+    u8 transfer_device;
+    u8 transfer_command;
+    u8 transfer_error;
+    u16 transfer_buffer;
+    u16 transfer_length;
+    u16 transfer_pcb_address;
+    u8 transfer_pcb_count;
+    u32 transfer_block;
+    u32 transfer_media_generation;
+    GC_AdamDebugDCB dcbs[GC_ADAM_DEBUG_DCB_COUNT];
+    u8 keyboard_fifo_count;
+    bool keyboard_overflow;
+    bool keyboard_lock;
+    bool keyboard_shift;
+    bool keyboard_control;
+    bool keyboard_home;
+    int keyboard_repeat_key;
+    int keyboard_repeat_cycles;
+    GC_AdamDebugMediaState media[GC_ADAM_MEDIA_SLOT_COUNT];
+    int printer_size;
+    u8 printer_data[GC_ADAM_DEBUG_PRINTER_SIZE];
+};
+
 enum GC_Keys
 {
     Keypad_8 = 0x01,
@@ -241,6 +485,18 @@ struct GC_RuntimeInfo
     int screen_height;
     GC_Region region;
     double fps;
+    float pixel_clock;
+    float line_rate;
+    int source_lines;
+    int active_region[4];
+    float chroma_origin;
+    float chroma_texel_cycles;
+    float chroma_line_cycles;
+    float chroma_frame_cycles;
+    u8 border_color[3];
+    bool border_valid;
+    int system_type;
+    int video_mode;
 };
 
 enum GC_Disassembler_Syntax
@@ -254,7 +510,6 @@ enum GC_Disassembler_Syntax
 
 struct GC_Disassembler_Record
 {
-    u32 address;
     u8 bank;
     char name[64];
     char bytes[25];

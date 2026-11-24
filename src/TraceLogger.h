@@ -34,15 +34,12 @@ enum GC_Trace_Type : u8
     TRACE_IO,
     TRACE_INPUT,
     TRACE_SGM,
+    TRACE_ADAM,
     TRACE_MAPPER,
     TRACE_TYPE_COUNT,
 };
 
 static_assert(TRACE_TYPE_COUNT < 32, "Trace category count exceeds flag width");
-
-#define TRACE_VDP_WRITE TRACE_VDP
-#define TRACE_VDP_STATUS TRACE_VDP
-#define TRACE_IO_PORT TRACE_IO
 
 #define TRACE_FLAG_CPU          (1U << TRACE_CPU)
 #define TRACE_FLAG_CPU_IRQ      (1U << TRACE_CPU_IRQ)
@@ -52,12 +49,8 @@ static_assert(TRACE_TYPE_COUNT < 32, "Trace category count exceeds flag width");
 #define TRACE_FLAG_IO           (1U << TRACE_IO)
 #define TRACE_FLAG_INPUT        (1U << TRACE_INPUT)
 #define TRACE_FLAG_SGM          (1U << TRACE_SGM)
+#define TRACE_FLAG_ADAM         (1U << TRACE_ADAM)
 #define TRACE_FLAG_MAPPER       (1U << TRACE_MAPPER)
-#define TRACE_FLAG_ALL          ((1U << TRACE_TYPE_COUNT) - 1U)
-
-#define TRACE_FLAG_VDP_WRITE  TRACE_FLAG_VDP
-#define TRACE_FLAG_VDP_STATUS TRACE_FLAG_VDP
-#define TRACE_FLAG_IO_PORT    TRACE_FLAG_IO
 
 enum GC_Trace_VDP_Event : u8
 {
@@ -72,6 +65,9 @@ enum GC_Trace_VDP_Event : u8
     TRACE_VDP_FRAME,
     TRACE_VDP_DATA_READ,
     TRACE_VDP_DATA_WRITE,
+    TRACE_VDP_SPRITE_BUDGET,
+    TRACE_VDP_SPRITE_LIMIT,
+    TRACE_VDP_MISSED_VBLANK,
 };
 
 #define TRACE_VDP_EVENT_REGISTERS  (1U << TRACE_VDP_REG_WRITE)
@@ -80,8 +76,13 @@ enum GC_Trace_VDP_Event : u8
 #define TRACE_VDP_EVENT_SPRITES    ((1U << TRACE_VDP_SPRITE_OVERFLOW) | (1U << TRACE_VDP_SPRITE_COLLISION))
 #define TRACE_VDP_EVENT_TIMING     ((1U << TRACE_VDP_DISPLAY_CHANGE) | (1U << TRACE_VDP_VBLANK) | (1U << TRACE_VDP_FRAME))
 #define TRACE_VDP_EVENT_VRAM       ((1U << TRACE_VDP_DATA_READ) | (1U << TRACE_VDP_DATA_WRITE))
-#define TRACE_VDP_EVENT_ALL        (TRACE_VDP_EVENT_REGISTERS | TRACE_VDP_EVENT_INTERRUPTS | TRACE_VDP_EVENT_STATUS | TRACE_VDP_EVENT_SPRITES | TRACE_VDP_EVENT_TIMING | TRACE_VDP_EVENT_VRAM)
-static_assert(TRACE_VDP_DATA_WRITE < 32, "VDP trace events exceed u32 width");
+#define TRACE_VDP_EVENT_SPRITE_BUDGET (1U << TRACE_VDP_SPRITE_BUDGET)
+#define TRACE_VDP_EVENT_SPRITE_LIMIT  (1U << TRACE_VDP_SPRITE_LIMIT)
+#define TRACE_VDP_EVENT_SPRITE_LINES  (TRACE_VDP_EVENT_SPRITE_BUDGET | TRACE_VDP_EVENT_SPRITE_LIMIT)
+#define TRACE_VDP_EVENT_MISSED_VBLANK (1U << TRACE_VDP_MISSED_VBLANK)
+#define TRACE_VDP_EVENT_DEFAULT    (TRACE_VDP_EVENT_REGISTERS | TRACE_VDP_EVENT_INTERRUPTS | TRACE_VDP_EVENT_STATUS | TRACE_VDP_EVENT_SPRITES | TRACE_VDP_EVENT_TIMING | TRACE_VDP_EVENT_VRAM)
+#define TRACE_VDP_EVENT_ALL        (TRACE_VDP_EVENT_DEFAULT | TRACE_VDP_EVENT_SPRITE_LINES | TRACE_VDP_EVENT_MISSED_VBLANK)
+static_assert(TRACE_VDP_MISSED_VBLANK < 32, "VDP trace events exceed u32 width");
 
 enum GC_Trace_PSG_Event : u8
 {
@@ -161,6 +162,22 @@ enum GC_Trace_SGM_Event : u8
 #define TRACE_SGM_EVENT_ALL     TRACE_SGM_EVENT_CONTROL
 static_assert(TRACE_SGM_CONTROL < 32, "SGM trace events exceed u32 width");
 
+enum GC_Trace_ADAM_Event : u8
+{
+    TRACE_ADAM_MAP = 0,
+    TRACE_ADAM_COMMAND_ACCEPT,
+    TRACE_ADAM_COMMAND_COMPLETE,
+    TRACE_ADAM_DMA_COMPLETE,
+    TRACE_ADAM_ERROR,
+};
+
+#define TRACE_ADAM_EVENT_MAP      (1U << TRACE_ADAM_MAP)
+#define TRACE_ADAM_EVENT_COMMANDS ((1U << TRACE_ADAM_COMMAND_ACCEPT) | (1U << TRACE_ADAM_COMMAND_COMPLETE))
+#define TRACE_ADAM_EVENT_DMA      (1U << TRACE_ADAM_DMA_COMPLETE)
+#define TRACE_ADAM_EVENT_ERRORS   (1U << TRACE_ADAM_ERROR)
+#define TRACE_ADAM_EVENT_ALL      (TRACE_ADAM_EVENT_MAP | TRACE_ADAM_EVENT_COMMANDS | TRACE_ADAM_EVENT_DMA | TRACE_ADAM_EVENT_ERRORS)
+static_assert(TRACE_ADAM_ERROR < 32, "ADAM trace events exceed u32 width");
+
 enum GC_Trace_Mapper_Event : u8
 {
     TRACE_MAPPER_BANK = 0,
@@ -173,12 +190,6 @@ enum GC_Trace_Mapper_Event : u8
 #define TRACE_MAPPER_EVENT_SRAM   (1U << TRACE_MAPPER_SRAM)
 #define TRACE_MAPPER_EVENT_ALL    (TRACE_MAPPER_EVENT_BANKS | TRACE_MAPPER_EVENT_EEPROM | TRACE_MAPPER_EVENT_SRAM)
 static_assert(TRACE_MAPPER_SRAM < 32, "Mapper trace events exceed u32 width");
-
-#define GC_VDP_EVENT_VINT        TRACE_VDP_VINT_FLAG
-#define GC_VDP_EVENT_VINT_FLAG   TRACE_VDP_VINT_FLAG
-#define GC_VDP_EVENT_DISPLAY     TRACE_VDP_DISPLAY_CHANGE
-#define GC_VDP_EVENT_SPRITE_OVR  TRACE_VDP_SPRITE_OVERFLOW
-#define GC_VDP_EVENT_SPRITE_COL  TRACE_VDP_SPRITE_COLLISION
 
 struct GC_Trace_Entry
 {
@@ -203,9 +214,6 @@ struct GC_Trace_Entry
             u8 size;
             u8 opcodes[7];
             char name[64];
-            bool iff1;
-            bool iff2;
-            bool halt;
         } cpu;
 
         struct
@@ -258,7 +266,6 @@ struct GC_Trace_Entry
             u8 raw;
             u8 effective;
             u8 channel;
-            u8 mixer;
             u8 amplitude;
             bool envelope_enabled;
             u16 period;
@@ -302,6 +309,23 @@ struct GC_Trace_Entry
             u16 banks[4];
             u16 auxiliary;
         } mapper;
+
+        struct
+        {
+            u8 event;
+            u8 target;
+            u8 command;
+            u8 response;
+            u8 device;
+            u8 dcb;
+            u8 old_value;
+            u8 new_value;
+            u8 error;
+            bool pcb;
+            u16 buffer;
+            u16 length;
+            u32 block;
+        } adam;
     };
 };
 
@@ -319,12 +343,8 @@ public:
     INLINE void TraceLog(const GC_Trace_Entry& entry);
     void SetEnabledFlags(u32 flags);
     void SetEventFilter(GC_Trace_Type type, u32 filter);
-    u32 GetEnabledFlags() const;
-    u32 GetEventFilter(GC_Trace_Type type) const;
-    const GC_Trace_Entry* GetBuffer() const;
     u32 GetCount() const;
     u32 GetCapacity() const;
-    u32 GetPosition() const;
     u64 GetTotalLogged() const;
     u64 GetSequence() const;
     const GC_Trace_Entry& GetEntry(u32 index) const;

@@ -36,7 +36,7 @@ public:
     void Tick(unsigned int clockCycles);
     int EndFrame(s16* pSampleBuffer);
     void SaveState(std::ostream& stream);
-    void LoadState(std::istream& stream);
+    void LoadState(std::istream& stream, int version);
     const u8* GetRegisters() const { return m_Registers; }
     u8 GetSelectedRegister() const { return m_SelectedRegister; }
     const u16* GetTonePeriods() const { return m_TonePeriod; }
@@ -51,7 +51,6 @@ public:
     u8 GetEnvelopeVolume() const { return m_EnvelopeVolume; }
     int GetClockRate() const { return m_iClockRate; }
     void EnableDebug(bool enable);
-    bool IsDebugEnabled() const { return m_DebugEnabled; }
     s16* GetDebugChannelBuffer(int channel);
     int GetDebugChannelSamples(int channel) const;
     bool* GetChannelMute(int channel);

@@ -22,14 +22,13 @@
 
 #include "Video.h"
 
-class Memory;
 class Processor;
 class TraceLogger;
 
 class TMS9918A : public Video
 {
 public:
-    TMS9918A(Memory* pMemory, Processor* pProcessor);
+    TMS9918A(Processor* pProcessor);
     ~TMS9918A();
     void Init();
     void Reset(bool bPAL);
@@ -46,8 +45,10 @@ public:
     int GetMode();
     void Render32bit(u16* srcFrameBuffer, u8* dstFrameBuffer, GC_Color_Format pixelFormat, int size, bool overscan = false);
     void Render16bit(u16* srcFrameBuffer, u8* dstFrameBuffer, GC_Color_Format pixelFormat, int size, bool overscan = false);
+    void RenderIndices(u16* srcFrameBuffer, u8* dstIndexBuffer, int size, bool overscan = false);
     void SetOverscan(Overscan overscan);
     Overscan GetOverscan();
+    void GetBackdropColor(u8* rgb);
     void SetCustomPalette(GC_Color* palette);
     void SetPredefinedPalette(int palette);
     void SetNoSpriteLimit(bool noSpriteLimit);
@@ -66,14 +67,19 @@ public:
 private:
     INLINE void TraceVDPEvent(u8 event, u8 reg = 0xFF, u8 raw = 0, int sprite = 0xFF, int auxiliary = 0);
     void LogVDPEvent(u8 event, u8 reg, u8 raw, int sprite, int auxiliary);
+    INLINE void TraceSpriteBudget(int line);
+    void LogSpriteBudget(int line);
+    INLINE void TraceMissedVBlank();
+    void LogMissedVBlank();
     void ScanLine(int line);
     void LatchSpriteAttributes();
+    void RemapVRAM(bool memory16K);
+    INLINE u16 ResolveBackdropColor() const;
     void RenderBackground(int line);
     void RenderSprites(int line);
     void InitPalettes();
 
 private:
-    Memory* m_pMemory;
     Processor* m_pProcessor;
     TraceLogger* m_pTraceLogger;
     u8* m_pInfoBuffer;
@@ -130,6 +136,18 @@ INLINE void TMS9918A::TraceVDPEvent(u8 event, u8 reg, u8 raw, int sprite, int au
         LogVDPEvent(event, reg, raw, sprite, auxiliary);
 }
 
+INLINE void TMS9918A::TraceSpriteBudget(int line)
+{
+    if (IsValidPointer(m_pTraceLogger) && m_pTraceLogger->IsEnabled(TRACE_VDP))
+        LogSpriteBudget(line);
+}
+
+INLINE void TMS9918A::TraceMissedVBlank()
+{
+    if (IsValidPointer(m_pTraceLogger) && m_pTraceLogger->IsEventEnabled(TRACE_VDP, TRACE_VDP_MISSED_VBLANK))
+        LogMissedVBlank();
+}
+
 inline u8* TMS9918A::GetVRAM()
 {
     return m_pVdpVRAM;
@@ -148,6 +166,12 @@ inline int TMS9918A::GetMode()
 inline u16* TMS9918A::GetFrameBuffer()
 {
     return m_pFrameBuffer;
+}
+
+INLINE u16 TMS9918A::ResolveBackdropColor() const
+{
+    u16 color = m_VdpRegister[7] & 0x0F;
+    return (color > 0) ? color : 1;
 }
 
 #endif	/* TMS9918A_H */
